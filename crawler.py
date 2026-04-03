@@ -94,10 +94,15 @@ def crawl():
 
         # ── ログイン ──
         page.goto(SITE_URL)
-        page.fill('input[name="UserID"]', LOGIN_ID)
-        page.fill('input[name="Password"]', LOGIN_PASSWORD)
-        page.click('input[type="submit"]')
         page.wait_for_load_state("networkidle")
+        page.screenshot(path="screenshot_login.png")
+
+        # ログインフォームの入力欄を探す（name属性が不明なためtype属性で検索）
+        page.locator('input[type="text"]').first.fill(LOGIN_ID)
+        page.locator('input[type="password"]').first.fill(LOGIN_PASSWORD)
+        page.locator('input[type="submit"]').first.click()
+        page.wait_for_load_state("networkidle")
+        page.screenshot(path="screenshot_after_login.png")
 
         # ── 生産計画表リンクをクリック ──
         page.click('text=生産計画表')
