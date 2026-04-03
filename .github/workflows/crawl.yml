@@ -1,0 +1,39 @@
+name: 生産計画表クロール
+
+on:
+  schedule:
+    # 日本時間 8:00（UTC 23:00）と 17:00（UTC 8:00）に実行
+    - cron: '0 23 * * *'
+    - cron: '0 8 * * *'
+  workflow_dispatch:  # 手動実行も可能にする
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: ライブラリをインストール
+        run: |
+          cd Azbil_VirtualFactory
+          pip install -r requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: クロールを実行
+        env:
+          SITE_LOGIN_ID:              ${{ secrets.SITE_LOGIN_ID }}
+          SITE_LOGIN_PASSWORD:        ${{ secrets.SITE_LOGIN_PASSWORD }}
+          GMAIL_PASSWORD:             ${{ secrets.GMAIL_PASSWORD }}
+          SPREADSHEET_ID:             ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_SHEETS_CREDENTIALS:  ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+        run: |
+          cd Azbil_VirtualFactory
+          python crawler.py
