@@ -119,13 +119,13 @@ def crawl():
 
         # HEADフレームの読み込みを待つ
         head_frame.wait_for_load_state("networkidle")
-        print("=== HEADフレームのHTML ===")
-        print(head_frame.content())
 
         # ── 検索条件：板金本体を選択して検索（HEADフレーム内）──
-        head_frame.check('input[value="板金本体"]')
+        # ラジオボタンのvalue属性は英語: BanSub/BanMain/Kumihai/Shukka
+        head_frame.check('input[value="BanMain"]')
         head_frame.click('input[value="検索"]')
         page.wait_for_load_state("networkidle")
+        page.screenshot(path="screenshot_calendar.png")
 
         # ── 1〜2週目と3〜4週目の2回クロール ──
         for week_range in ["1〜2週目", "3〜4週目"]:
