@@ -117,6 +117,11 @@ def crawl():
         if body_frame is None:
             body_frame = next((f for f in page.frames if "W20_body" in f.url), None)
 
+        # HEADフレームの読み込みを待つ
+        head_frame.wait_for_load_state("networkidle")
+        print("=== HEADフレームのHTML ===")
+        print(head_frame.content())
+
         # ── 検索条件：板金本体を選択して検索（HEADフレーム内）──
         head_frame.check('input[value="板金本体"]')
         head_frame.click('input[value="検索"]')
