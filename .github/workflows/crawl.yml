@@ -22,7 +22,6 @@ jobs:
 
       - name: ライブラリをインストール
         run: |
-          cd Azbil_VirtualFactory
           pip install -r requirements.txt
           playwright install chromium
           playwright install-deps chromium
@@ -35,5 +34,4 @@ jobs:
           SPREADSHEET_ID:             ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_SHEETS_CREDENTIALS:  ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         run: |
-          cd Azbil_VirtualFactory
           python crawler.py
