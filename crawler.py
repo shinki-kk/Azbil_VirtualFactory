@@ -108,23 +108,18 @@ def crawl():
         page.click('text=生産計画表')
         page.wait_for_load_state("networkidle")
 
-        # ── ページがフレーム構成のため、BODYフレームにアクセス ──
-        # フレームのURLを確認してデバッグ
-        for frame in page.frames:
-            print(f"フレームURL: {frame.url}")
+        # ── ページがフレーム構成のため、HEADフレームにアクセス ──
+        head_frame = page.frame(name="HEAD")
+        if head_frame is None:
+            head_frame = next((f for f in page.frames if "W20_head" in f.url), None)
 
         body_frame = page.frame(name="BODY")
         if body_frame is None:
-            # フレーム名で見つからない場合はURLで検索
             body_frame = next((f for f in page.frames if "W20_body" in f.url), None)
 
-        print(f"BODYフレーム: {body_frame}")
-        if body_frame:
-            print(body_frame.content())
-
-        # ── 検索条件：板金本体を選択して検索 ──
-        body_frame.check('input[value="板金本体"]')
-        body_frame.click('input[value="検索"]')
+        # ── 検索条件：板金本体を選択して検索（HEADフレーム内）──
+        head_frame.check('input[value="板金本体"]')
+        head_frame.click('input[value="検索"]')
         page.wait_for_load_state("networkidle")
 
         # ── 1〜2週目と3〜4週目の2回クロール ──
