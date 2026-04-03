@@ -31,7 +31,7 @@ jobs:
         env:
           SITE_LOGIN_ID:              ${{ secrets.SITE_LOGIN_ID }}
           SITE_LOGIN_PASSWORD:        ${{ secrets.SITE_LOGIN_PASSWORD }}
-          GMAIL_PASSWORD:             ${{ secrets.GMAIL_PASSWORD }}
+          MAIL_PASSWORD:              ${{ secrets.MAIL_PASSWORD }}
           SPREADSHEET_ID:             ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_SHEETS_CREDENTIALS:  ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         run: |

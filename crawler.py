@@ -26,9 +26,11 @@ SITE_URL       = "https://v-factory.azbil.com/rweb/WALOG/asp/WALOG.asp"
 LOGIN_ID       = os.environ["SITE_LOGIN_ID"]
 LOGIN_PASSWORD = os.environ["SITE_LOGIN_PASSWORD"]
 
-GMAIL_USER     = "shinki.kk@gmail.com"
-GMAIL_PASSWORD = os.environ["GMAIL_PASSWORD"]
-MAIL_TO        = "sinki@shinki-kk.co.jp"
+MAIL_USER     = "sinki@shinki-kk.co.jp"
+MAIL_PASSWORD = os.environ["MAIL_PASSWORD"]
+MAIL_TO       = "sinki@shinki-kk.co.jp"
+SMTP_SERVER   = "smtp.lolipop.jp"
+SMTP_PORT     = 465
 
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]          # スプレッドシートのID
 SHEET_MAIN     = "最新データ"                            # メインシート名
@@ -260,13 +262,13 @@ def send_email(changes, new_rows):
     body = "\n".join(lines)
 
     msg = MIMEMultipart()
-    msg["From"]    = GMAIL_USER
+    msg["From"]    = MAIL_USER
     msg["To"]      = MAIL_TO
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(GMAIL_USER, GMAIL_PASSWORD)
+    with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+        server.login(MAIL_USER, MAIL_PASSWORD)
         server.send_message(msg)
 
     print("メール送信完了")
@@ -279,13 +281,13 @@ def send_no_change_email(new_rows):
     body = f"生産計画表に変更はありませんでした。（確認日時：{now}）\n取得ジョブ数：{len(new_rows)}件"
 
     msg = MIMEMultipart()
-    msg["From"]    = GMAIL_USER
+    msg["From"]    = MAIL_USER
     msg["To"]      = MAIL_TO
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(GMAIL_USER, GMAIL_PASSWORD)
+    with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+        server.login(MAIL_USER, MAIL_PASSWORD)
         server.send_message(msg)
 
     print("変更なしメール送信完了")
