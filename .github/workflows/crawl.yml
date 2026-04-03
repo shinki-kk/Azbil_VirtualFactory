@@ -23,8 +23,7 @@ jobs:
       - name: ライブラリをインストール
         run: |
           pip install -r requirements.txt
-          playwright install chromium
-          playwright install-deps chromium
+          playwright install --with-deps chromium
 
       - name: クロールを実行
         env:
