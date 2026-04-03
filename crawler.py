@@ -107,8 +107,11 @@ def crawl():
         # ── 生産計画表リンクをクリック ──
         page.click('text=生産計画表')
         page.wait_for_load_state("networkidle")
+        page.screenshot(path="screenshot_seisan_menu.png")
 
         # ── 検索条件：板金本体を選択して検索 ──
+        page.screenshot(path="screenshot_search_form.png")
+        print(page.content())  # ページのHTMLを出力してデバッグ
         page.check('input[value="板金本体"]')
         page.click('input[value="検索"]')
         page.wait_for_load_state("networkidle")
