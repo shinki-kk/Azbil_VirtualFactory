@@ -448,7 +448,11 @@ def extract_job_detail(page):
     gaiken        = get_input("QS_DwgNo")                # 外形図番
     banshu        = get_td_text("盤種類")                 # 盤種類
     honsuu        = get_input("QS_Ukeire")               # 本数
-    shizubi       = get_td_text("予実績")                 # 出図日（板金・塗装列の予実績）
+    shizubi_raw   = get_td_text("予実績")                 # 出図日（板金・塗装列の予実績）
+    try:
+        shizubi = datetime.strptime(shizubi_raw, "%y-%m-%d").strftime("%Y/%m/%d")
+    except Exception:
+        shizubi = shizubi_raw  # 変換できない場合はそのまま
     kumiai        = get_input("QS_KumiCorpName")         # 組配協力会社名
 
     if not koujiban:
