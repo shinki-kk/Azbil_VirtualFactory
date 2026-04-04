@@ -353,14 +353,12 @@ def scrape_calendar(page, calendar_root):
                     print(f"  [確認] ページタイトル: {detail_page.title()}", flush=True)
                     detail_page.screenshot(path="screenshot_detail.png", full_page=True)
                     print("  （screenshot_detail.png を保存しました）", flush=True)
-                    # 値のあるinput要素をすべて出力（盤種類の特定用）
-                    all_inputs = detail_page.eval_on_selector_all(
-                        "input",
-                        "els => els.map(e => ({name: e.name, type: e.type, value: e.value})).filter(e => e.value && e.value.trim())"
-                    )
-                    print("  [HTML確認] 値のあるinput要素一覧:", flush=True)
-                    for inp in all_inputs:
-                        print(f"    name={inp['name']!r} type={inp['type']} value={inp['value']}", flush=True)
+                    # 盤種類の取得方法を調査（tdのテキスト）
+                    try:
+                        banshu_candidate = detail_page.locator('td:has-text("盤種類") + td').first.inner_text(timeout=3000).strip()
+                        print(f"  [HTML確認] 盤種類候補(tdテキスト): {banshu_candidate!r}", flush=True)
+                    except Exception as e:
+                        print(f"  [HTML確認] 盤種類td取得失敗: {e}", flush=True)
                 job = extract_job_detail(detail_page, now)
                 if job:
                     jobs.append(job)
