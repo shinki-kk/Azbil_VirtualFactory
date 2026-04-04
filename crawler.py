@@ -197,10 +197,15 @@ def crawl():
         page.locator('input[type="text"]').first.fill(LOGIN_ID)
         page.locator('input[type="password"]').first.fill(LOGIN_PASSWORD)
         page.locator('input[type="submit"]').first.click()
-        page.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
+        # ログイン後のリダイレクトが完全に終わるまで待つ
+        try:
+            page.wait_for_load_state("networkidle", timeout=_PW_TIMEOUT_MS)
+        except Exception:
+            page.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
         page.screenshot(path="screenshot_after_login.png")
 
         # ── 生産計画表リンクをクリック ──
+        page.locator('text=生産計画表').wait_for(timeout=_PW_TIMEOUT_MS)
         page.click('text=生産計画表')
         page.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
 
