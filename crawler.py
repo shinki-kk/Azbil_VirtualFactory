@@ -246,12 +246,19 @@ def crawl():
         context.route("**/*", _route_skip_images_fonts)
 
         # ── 1〜2週目と3〜4週目の2回クロール ──
+        # 1〜2週目のhrefを記録して、3〜4週目で新しいデータが出たか判定に使う
+        first_half_hrefs = set()
+
         for week_range in ["1〜2週目", "3〜4週目"]:
             # 検索直後・週切り替え直後は必ずフレームを取り直す（古い Frame は detached になる）
             calendar_root = _resolve_calendar_root(page)
             jobs += scrape_calendar(page, calendar_root)
 
             if week_range == "1〜2週目":
+                # 1〜2週目で取得したhrefを記録
+                first_half_hrefs = set(_collect_detail_hrefs(calendar_root, page))
+                print(f"[クロール] 1〜2週目のhref記録: {len(first_half_hrefs)}件", flush=True)
+
                 # ── 「次の2週」ボタンで3〜4週目へ移動 ──
                 # detachedフレームへのクリックは無効なため、全フレームを走査して
                 # 生きているフレームの中からボタンを探す
@@ -293,28 +300,31 @@ def crawl():
                         print(f"[クロール] CmnWait後の遷移タイムアウト: {e}", flush=True)
 
                     # BODYフレームの読み込みを待つ
-                    # フレームが完全にリロードされるまでリトライする
-                    time.sleep(2)
+                    # DOMが実際に更新されるまでリトライ（hrefが変わったかで判定）
+                    time.sleep(3)
                     new_body = None
-                    for attempt in range(10):
+                    for attempt in range(15):
                         candidate = _resolve_calendar_root(page)
                         if candidate is not page and _is_frame_alive(candidate):
                             try:
                                 candidate.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
-                                # カレンダーアイコンが存在するか確認（新しいページが読み込まれた証拠）
-                                icon_count = candidate.locator("img[src*='calendar.jpg']").count()
-                                if icon_count > 0:
+                                # 新しいカレンダーのhrefを取得して、1〜2週目と異なるか確認
+                                new_hrefs = set(_collect_detail_hrefs(candidate, page))
+                                if new_hrefs and new_hrefs != first_half_hrefs:
                                     new_body = candidate
-                                    print(f"[クロール] 新BODYフレーム確認OK（アイコン{icon_count}個、試行{attempt+1}回目）", flush=True)
+                                    print(f"[クロール] 3〜4週目の新データ確認OK（{len(new_hrefs)}件、試行{attempt+1}回目）", flush=True)
                                     break
+                                else:
+                                    print(f"[クロール] DOMまだ更新されていない（href同一、試行{attempt+1}回目）", flush=True)
                             except Exception:
                                 pass
-                        print(f"[クロール] BODYフレーム待機中…（試行{attempt+1}回目）", flush=True)
+                        else:
+                            print(f"[クロール] BODYフレーム待機中…（試行{attempt+1}回目）", flush=True)
                         time.sleep(2)
 
                     if new_body is None:
                         new_body = _resolve_calendar_root(page)
-                        print("[クロール] 警告：新BODYフレームの確認がタイムアウトしました", flush=True)
+                        print("[クロール] 警告：3〜4週目のDOM更新が確認できませんでした", flush=True)
 
                     final_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
                     print(f"[クロール] 3〜4週目 BODYフレームURL: {final_url[:100]}", flush=True)
