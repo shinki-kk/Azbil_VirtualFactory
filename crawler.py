@@ -86,6 +86,17 @@ def write_sheet(client, sheet_name, rows):
 # ──────────────────────────────────────────
 # クロール処理
 # ──────────────────────────────────────────
+def _resolve_calendar_root(page):
+    """
+    カレンダーがある BODY フレームを返す。
+    検索ボタンや「次の2週」でフレームが差し替わると、以前の Frame は detached になるため毎回取り直す。
+    """
+    body = page.frame(name="BODY")
+    if body is None:
+        body = next((f for f in page.frames if f.url and "W20_body" in f.url), None)
+    return body if body is not None else page
+
+
 def crawl():
     """サイトにログインして生産計画表を4週分クロールし、ジョブ一覧を返す"""
     jobs = []
@@ -113,18 +124,11 @@ def crawl():
         # ── ページがフレーム構成のため、HEADフレームにアクセス ──
         head_frame = page.frame(name="HEAD")
         if head_frame is None:
-            head_frame = next((f for f in page.frames if "W20_head" in f.url), None)
-
-        body_frame = page.frame(name="BODY")
-        if body_frame is None:
-            body_frame = next((f for f in page.frames if "W20_body" in f.url), None)
+            head_frame = next((f for f in page.frames if f.url and "W20_head" in f.url), None)
 
         # HEADフレームの読み込みを待つ
         if head_frame is not None:
             head_frame.wait_for_load_state("networkidle")
-
-        # カレンダーは多くの場合 BODY フレーム内。メインの page だけではリンクが0件になる。
-        calendar_root = body_frame if body_frame is not None else page
 
         # ── 検索条件：板金本体を選択して検索（HEADフレーム内）──
         # ラジオボタンのvalue属性は英語: BanSub/BanMain/Kumihai/Shukka
@@ -135,10 +139,12 @@ def crawl():
 
         # ── 1〜2週目と3〜4週目の2回クロール ──
         for week_range in ["1〜2週目", "3〜4週目"]:
+            # 検索直後・週切り替え直後は必ずフレームを取り直す（古い Frame は detached になる）
+            calendar_root = _resolve_calendar_root(page)
             jobs += scrape_calendar(page, calendar_root)
 
             if week_range == "1〜2週目":
-                # 「次の2週」はカレンダーと同じフレーム内にあることが多い
+                calendar_root = _resolve_calendar_root(page)
                 calendar_root.click('text=次の2週')
                 page.wait_for_load_state("networkidle")
 
