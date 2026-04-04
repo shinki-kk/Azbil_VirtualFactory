@@ -258,6 +258,11 @@ def crawl():
                         new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
                     except Exception:
                         pass
+                    # スクリーンショット（BODYフレームの中身）
+                    try:
+                        new_body.locator("body").screenshot(path="screenshot_calendar_week34.png")
+                    except Exception:
+                        page.screenshot(path="screenshot_calendar_week34.png")
                     try:
                         new_body.wait_for_selector(
                             'a:has(img[src*="calendar.jpg"])',
@@ -268,6 +273,7 @@ def crawl():
                         print(f"[クロール] 3〜4週目：カレンダーアイコンなし ({e})", flush=True)
                 else:
                     print("[クロール] BODYフレームが見つかりませんでした", flush=True)
+                    page.screenshot(path="screenshot_calendar_week34.png")
                 print("[クロール] 3〜4週目カレンダーに移動しました", flush=True)
 
         browser.close()
