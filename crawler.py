@@ -353,6 +353,14 @@ def scrape_calendar(page, calendar_root):
                     print(f"  [確認] ページタイトル: {detail_page.title()}", flush=True)
                     detail_page.screenshot(path="screenshot_detail.png", full_page=True)
                     print("  （screenshot_detail.png を保存しました）", flush=True)
+                    # input要素の name と value を全件出力してセレクター確認に使う
+                    inputs = detail_page.eval_on_selector_all(
+                        "input",
+                        "els => els.map(e => ({name: e.name, type: e.type, value: e.value}))"
+                    )
+                    print("  [HTML確認] input要素一覧:", flush=True)
+                    for inp in inputs:
+                        print(f"    name={inp['name']} type={inp['type']} value={inp['value']}", flush=True)
                 job = extract_job_detail(detail_page, now)
                 if job:
                     jobs.append(job)
