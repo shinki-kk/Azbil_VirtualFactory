@@ -250,6 +250,19 @@ def crawl():
                     btn_url = getattr(button_frame, "url", "N/A")
                     print(f"[クロール] 次の2週ボタン発見: frame={button_frame.name!r} url={btn_url[:80]}", flush=True)
 
+                    # フォームのパラメーターを確認（診断用）
+                    try:
+                        form_info = button_frame.evaluate("""() => {
+                            const btn = document.querySelector('input[name="QS_NextWeek"]');
+                            if (!btn || !btn.form) return null;
+                            const f = btn.form;
+                            const inputs = Array.from(f.elements).map(e => ({n: e.name, v: e.value, t: e.type}));
+                            return {action: f.action, method: f.method, target: f.target, inputs: inputs};
+                        }""")
+                        print(f"[フォーム情報] {form_info}", flush=True)
+                    except Exception as e:
+                        print(f"[フォーム情報] 取得失敗: {e}", flush=True)
+
                     # 画像ブロックを一時解除（待機ページのJavaScriptが正常動作するよう）
                     context.unroute("**/*")
 
@@ -270,6 +283,12 @@ def crawl():
                     # CmnWaitNonClear.asp（待機中継ページ）が出た場合、
                     # ページ全体の再ナビゲーションを待つ（TARGET="_top" で再度フルリロード）
                     if "CmnWait" in new_url:
+                        # 待機ページの中身を確認（診断用）
+                        try:
+                            wait_html = new_body.content()
+                            print(f"[待機ページ内容] {wait_html[:800]}", flush=True)
+                        except Exception as e:
+                            print(f"[待機ページ内容] 取得失敗: {e}", flush=True)
                         print("[クロール] 待機ページ検出。フルページナビゲーションを待ちます…", flush=True)
                         try:
                             with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
