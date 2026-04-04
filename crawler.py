@@ -309,6 +309,7 @@ def scrape_calendar(page, calendar_root):
     # タブを毎回 new/close しない（Chrome で人が連続クリックするのに近く、CI でも速い）
     detail_page = page.context.new_page()
     detail_page.set_default_navigation_timeout(_PW_DETAIL_NAV_MS)
+    detail_page.set_default_timeout(5_000)   # 要素が見つからない場合は5秒で諦める
     try:
         for i, detail_url in enumerate(detail_urls, start=1):
             print(f"  詳細取得 {i}/{len(detail_urls)} …", flush=True)
