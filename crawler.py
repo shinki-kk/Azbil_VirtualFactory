@@ -230,23 +230,38 @@ def crawl():
             jobs += scrape_calendar(page, calendar_root)
 
             if week_range == "1〜2週目":
-                # 「次の2週」ボタンはHEAD/BODYどちらかにある。全フレームから探してクリック
+                # 各フレームのURL・「次の2週」の有無を出力して原因調査
+                print("[クロール] フレーム一覧:", flush=True)
+                for fr in page.frames:
+                    try:
+                        has_btn = fr.locator('text=次の2週').count() > 0
+                        print(f"  name={fr.name!r} url={fr.url[:80]} 次の2週={has_btn}", flush=True)
+                    except Exception as e:
+                        print(f"  name={fr.name!r} 取得失敗: {e}", flush=True)
+
+                # 全フレームから「次の2週」を探してクリック
                 clicked = False
-                for fr in [page] + page.frames:
+                for fr in page.frames:
                     try:
                         btn = fr.locator('text=次の2週')
                         if btn.count() > 0:
                             btn.first.click()
                             clicked = True
-                            print("[クロール] 「次の2週」クリック成功", flush=True)
+                            print(f"[クロール] 「次の2週」クリック成功（frame: {fr.name!r}）", flush=True)
                             break
                     except Exception:
                         pass
                 if not clicked:
                     print("[クロール] 警告：「次の2週」ボタンが見つかりませんでした", flush=True)
-                time.sleep(3)   # フレーム差し替わりを待つ
-                page.screenshot(path="screenshot_calendar_week34.png")
-                print("[クロール] 3〜4週目カレンダーのスクリーンショットを保存しました", flush=True)
+                time.sleep(5)   # フレーム差し替わりを待つ
+
+                # BODYフレームから直接スクリーンショットを取得
+                body_frame = _resolve_calendar_root(page)
+                try:
+                    body_frame.locator("body").screenshot(path="screenshot_calendar_week34.png")
+                except Exception:
+                    page.screenshot(path="screenshot_calendar_week34.png")
+                print("[クロール] 3〜4週目スクリーンショット保存完了", flush=True)
 
         browser.close()
 
