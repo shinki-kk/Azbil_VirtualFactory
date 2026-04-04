@@ -13,6 +13,7 @@ import smtplib
 import sys
 import traceback
 from datetime import datetime
+from urllib.parse import urljoin
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -153,8 +154,18 @@ def crawl():
     return jobs
 
 
-def _detail_page_url(href):
-    """詳細画面への絶対URLを組み立てる"""
+# 相対リンク解決のフォールバック（フレームURLが取れないとき）
+_DEFAULT_LINK_BASE = "https://v-factory.azbil.com/rweb/WALOG/asp/W20_body.asp"
+
+
+def _frame_resolve_base(fr):
+    """フレーム内の相対hrefを解決するための基準URL（そのフレームのドキュメントURL）"""
+    u = getattr(fr, "url", None) or ""
+    return u if u.startswith("http") else _DEFAULT_LINK_BASE
+
+
+def _detail_page_url(href, base_url=None):
+    """詳細画面への絶対URLを組み立てる（../../CMN/... など相対パスは urljoin で解決）"""
     if not href:
         return None
     href = href.strip()
@@ -162,7 +173,8 @@ def _detail_page_url(href):
         return href
     if href.startswith("/"):
         return f"https://v-factory.azbil.com{href}"
-    return f"https://v-factory.azbil.com/rweb/WALOG/asp/{href}"
+    base = base_url or _DEFAULT_LINK_BASE
+    return urljoin(base, href)
 
 
 def _looks_like_job_detail_href(href):
@@ -173,9 +185,13 @@ def _looks_like_job_detail_href(href):
     low = u.lower()
     if low.startswith("javascript:") or low.startswith("#") or low.startswith("mailto:"):
         return False
+    # 旧：WALOG 詳細直リンク
     if "walog_detail" in low:
         return True
     if "walog" in low and "detail" in low:
+        return True
+    # 実サイトのカレンダーアイコン：中継 → RtnURL 内に W21（工程）/ W26 等
+    if "cmnlinknonclear.asp" in low and "rtnurl" in low:
         return True
     return False
 
@@ -209,8 +225,8 @@ def _iter_calendar_frames(calendar_root, page):
 
 def _collect_detail_hrefs(calendar_root, page):
     """
-    詳細URLを重複なく収集。
-    実サイトでは WALOG_DETAIL 以外のファイル名・area タグ・子フレームの可能性がある。
+    詳細URLを重複なく収集（絶対URLのリストを返す）。
+    カレンダーアイコンは CmnLinkNonClear.asp?RtnURL=... のため、フレームURL基準で相対パスを解決する。
     """
     ordered = []
     seen = set()
@@ -222,14 +238,15 @@ def _collect_detail_hrefs(calendar_root, page):
         except Exception:
             return
         all_raw.extend(part)
+        base_url = _frame_resolve_base(fr)
         for h in part:
             if not _looks_like_job_detail_href(h):
                 continue
-            key = _detail_page_url(h) or h
-            if key in seen:
+            full = _detail_page_url(h, base_url)
+            if not full or full in seen:
                 continue
-            seen.add(key)
-            ordered.append(h)
+            seen.add(full)
+            ordered.append(full)
 
     for fr in _iter_calendar_frames(calendar_root, page):
         process_frame(fr)
@@ -259,10 +276,7 @@ def scrape_calendar(page, calendar_root):
     detail_urls = _collect_detail_hrefs(calendar_root, page)
     print(f"詳細リンク数：{len(detail_urls)}件（この2週分の画面）")
 
-    for href in detail_urls:
-        detail_url = _detail_page_url(href)
-        if not detail_url:
-            continue
+    for detail_url in detail_urls:
         detail_page = page.context.new_page()
         detail_page.goto(detail_url)
         detail_page.wait_for_load_state("networkidle")
