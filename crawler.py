@@ -14,7 +14,7 @@ import sys
 import time
 import traceback
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs, unquote
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -191,6 +191,29 @@ def _frame_resolve_base(fr):
     return u if u.startswith("http") else _DEFAULT_LINK_BASE
 
 
+def _resolve_cmnlinknonclear(url):
+    """
+    CmnLinkNonClear.asp?RtnURL=... は中継ページなので、
+    RtnURL パラメータから実際の遷移先URLを取り出して直接使う。
+    """
+    if "cmnlinknonclear.asp" not in url.lower():
+        return url
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    rtn = None
+    for k, v in params.items():
+        if k.lower() == "rtnurl":
+            rtn = v[0]
+            break
+    if not rtn:
+        return url
+    rtn_path = unquote(rtn)  # 例: ../../LPP/asp/W26.asp?KouBan=...
+    base = url.split("?")[0]  # CmnLinkNonClear.asp の絶対URL
+    resolved = urljoin(base, rtn_path)
+    print(f"  [リダイレクト解決] {resolved}", flush=True)
+    return resolved
+
+
 def _detail_page_url(href, base_url=None):
     """詳細画面への絶対URLを組み立てる（../../CMN/... など相対パスは urljoin で解決）"""
     if not href:
@@ -269,7 +292,7 @@ def _collect_detail_hrefs(calendar_root, page):
         for h in part:
             if not _looks_like_job_detail_href(h):
                 continue
-            full = _detail_page_url(h, base_url)
+            full = _resolve_cmnlinknonclear(_detail_page_url(h, base_url))
             if not full or full in seen:
                 continue
             seen.add(full)
