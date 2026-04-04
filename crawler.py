@@ -264,6 +264,36 @@ def crawl():
                     new_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
                     print(f"[クロール] 移動後 BODYフレームURL: {new_url[:100]}", flush=True)
 
+                    # CmnWaitNonClear.asp（待機中継ページ）が出た場合、
+                    # 実際のカレンダーページへのリダイレクトを待つ
+                    if "CmnWait" in new_url:
+                        print("[クロール] 待機ページ検出。カレンダー読み込みを待ちます…", flush=True)
+                        deadline2 = time.time() + _PW_TIMEOUT_MS / 1000
+                        found = False
+                        while time.time() < deadline2:
+                            for fr in page.frames:
+                                fr_url = getattr(fr, "url", "") or ""
+                                if "W20_body" in fr_url and "CmnWait" not in fr_url:
+                                    try:
+                                        fr.evaluate("1")   # detached でないか確認
+                                        new_body = fr
+                                        found = True
+                                        break
+                                    except Exception:
+                                        pass
+                            if found:
+                                break
+                            time.sleep(0.5)
+                        if found:
+                            final_url = getattr(new_body, "url", "N/A")
+                            print(f"[クロール] 3〜4週目カレンダー確認: {final_url[:100]}", flush=True)
+                            try:
+                                new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
+                            except Exception:
+                                pass
+                        else:
+                            print("[クロール] 待機ページからのリダイレクトがタイムアウトしました", flush=True)
+
                     # スクリーンショット
                     try:
                         page.screenshot(path="screenshot_calendar_week34.png")
