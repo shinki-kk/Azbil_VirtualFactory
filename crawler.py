@@ -230,50 +230,54 @@ def crawl():
             jobs += scrape_calendar(page, calendar_root)
 
             if week_range == "1〜2週目":
-                # BODYフレーム内の「次の2週」ボタンをクリック
-                # TARGET="_top" でページ全体がリロードされるため expect_navigation で待つ
+                # ── 「次の2週」ボタンで3〜4週目へ移動 ──
                 calendar_root = _resolve_calendar_root(page)
-                with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
-                    calendar_root.locator('input[name="QS_NextWeek"]').click()
-                # フレームセットのload後、新しいBODYフレームが生きているか確認しながら待つ
+                old_url = getattr(calendar_root, "url", "") or ""
+                print(f"[クロール] クリック前 BODYフレームURL: {old_url[:100]}", flush=True)
+
+                # ボタンをクリック（TARGET="_top" なのでトップフレームがリロードされる）
+                calendar_root.locator('input[name="QS_NextWeek"]').click()
+
+                # BODYフレームのURLが変わるまで最大60秒待つ
                 new_body = None
-                deadline = time.time() + 30
+                deadline = time.time() + 60
                 while time.time() < deadline:
-                    fr = page.frame(name="BODY")
-                    if fr is None:
-                        fr = next((f for f in page.frames if f.url and "W20_body" in f.url), None)
-                    if fr is not None:
+                    for fr in page.frames:
+                        fr_url = getattr(fr, "url", "") or ""
+                        if fr_url == old_url or not fr_url:
+                            continue
+                        if "W20_body" not in fr_url and fr.name != "BODY":
+                            continue
                         try:
-                            fr.evaluate("1")   # detached なら例外が出る
+                            fr.evaluate("1")   # detached なら例外
                             new_body = fr
                             break
                         except Exception:
                             pass
-                    time.sleep(0.3)
-                # デバッグ：BODYフレームの状態を確認
+                    if new_body is not None:
+                        break
+                    time.sleep(0.5)
+
                 if new_body is not None:
-                    body_url = getattr(new_body, "url", "N/A")
-                    print(f"[クロール] BODYフレーム取得OK: {body_url[:100]}", flush=True)
+                    new_url = getattr(new_body, "url", "N/A")
+                    print(f"[クロール] クリック後 BODYフレームURL: {new_url[:100]}", flush=True)
                     try:
                         new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
                     except Exception:
                         pass
-                    # スクリーンショット（BODYフレームの中身）
-                    try:
-                        new_body.locator("body").screenshot(path="screenshot_calendar_week34.png")
-                    except Exception:
-                        page.screenshot(path="screenshot_calendar_week34.png")
-                    try:
-                        new_body.wait_for_selector(
-                            'a:has(img[src*="calendar.jpg"])',
-                            timeout=_PW_TIMEOUT_MS,
-                        )
-                        print("[クロール] 3〜4週目のカレンダーアイコンを確認しました", flush=True)
-                    except Exception as e:
-                        print(f"[クロール] 3〜4週目：カレンダーアイコンなし ({e})", flush=True)
                 else:
-                    print("[クロール] BODYフレームが見つかりませんでした", flush=True)
+                    # URLが変わらなかった場合：同名フレームをそのまま使う
+                    new_body = page.frame(name="BODY")
+                    new_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
+                    print(f"[クロール] URLが変化しませんでした。現在のBODYURL: {new_url[:100]}", flush=True)
+
+                # スクリーンショット（page全体で確実に撮る）
+                try:
                     page.screenshot(path="screenshot_calendar_week34.png")
+                    print("[クロール] スクリーンショット保存OK (screenshot_calendar_week34.png)", flush=True)
+                except Exception as e:
+                    print(f"[クロール] スクリーンショット失敗: {e}", flush=True)
+
                 print("[クロール] 3〜4週目カレンダーに移動しました", flush=True)
 
         browser.close()
