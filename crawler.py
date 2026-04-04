@@ -303,6 +303,11 @@ def scrape_calendar(page, calendar_root):
     detail_urls = _collect_detail_hrefs(calendar_root, page)
     print(f"詳細リンク数：{len(detail_urls)}件（この2週分の画面）", flush=True)
 
+    # テストモード：最初の3件だけ取得して動作確認を素早く行う
+    if os.environ.get("TEST_MODE") == "true":
+        detail_urls = detail_urls[:3]
+        print(f"  ※テストモード：{len(detail_urls)}件に絞って取得します", flush=True)
+
     if not detail_urls:
         return jobs
 

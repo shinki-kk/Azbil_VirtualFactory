@@ -6,6 +6,11 @@ on:
     - cron: '0 23 * * *'
     - cron: '0 8 * * *'
   workflow_dispatch:  # 手動実行も可能にする
+    inputs:
+      test_mode:
+        description: 'テストモード（最初の3件のみ取得・高速）'
+        type: boolean
+        default: false
 
 jobs:
   crawl:
@@ -43,6 +48,7 @@ jobs:
       - name: クロールを実行
         env:
           PYTHONUNBUFFERED:           "1"  # GitHub上で print がすぐログに出るようにする
+          TEST_MODE:                  ${{ github.event.inputs.test_mode }}
           SITE_LOGIN_ID:              ${{ secrets.SITE_LOGIN_ID }}
           SITE_LOGIN_PASSWORD:        ${{ secrets.SITE_LOGIN_PASSWORD }}
           MAIL_PASSWORD:              ${{ secrets.MAIL_PASSWORD }}
