@@ -250,19 +250,6 @@ def crawl():
                     btn_url = getattr(button_frame, "url", "N/A")
                     print(f"[クロール] 次の2週ボタン発見: frame={button_frame.name!r} url={btn_url[:80]}", flush=True)
 
-                    # フォームのパラメーターを確認（診断用）
-                    try:
-                        form_info = button_frame.evaluate("""() => {
-                            const btn = document.querySelector('input[name="QS_NextWeek"]');
-                            if (!btn || !btn.form) return null;
-                            const f = btn.form;
-                            const inputs = Array.from(f.elements).map(e => ({n: e.name, v: e.value, t: e.type}));
-                            return {action: f.action, method: f.method, target: f.target, inputs: inputs};
-                        }""")
-                        print(f"[フォーム情報] {form_info}", flush=True)
-                    except Exception as e:
-                        print(f"[フォーム情報] 取得失敗: {e}", flush=True)
-
                     # 画像ブロックを一時解除（待機ページのJavaScriptが正常動作するよう）
                     context.unroute("**/*")
 
@@ -270,59 +257,28 @@ def crawl():
                     with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
                         button_frame.locator('input[name="QS_NextWeek"]').click()
 
-                    # フレームセット再構築を少し待つ
+                    # CmnWaitNonClear.asp は HEAD フレームの JS が window.top を W20.asp へ
+                    # リダイレクトする中継ページ。リダイレクトが速すぎて expect_navigation を
+                    # 使うと race condition になるため wait_for_url で「現在 or 将来」を待つ
+                    print(f"[クロール] 移動後ページURL: {page.url[:100]}", flush=True)
+                    try:
+                        page.wait_for_url(
+                            lambda url: "CmnWait" not in url,
+                            timeout=_PW_TIMEOUT_MS,
+                        )
+                        print(f"[クロール] 最終ページURL: {page.url[:100]}", flush=True)
+                    except Exception as e:
+                        print(f"[クロール] CmnWait後の遷移タイムアウト: {e}", flush=True)
+
+                    # BODYフレームの読み込みを待つ
                     time.sleep(2)
                     new_body = _resolve_calendar_root(page)
                     try:
                         new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
                     except Exception:
                         pass
-                    new_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
-                    print(f"[クロール] 移動後 BODYフレームURL: {new_url[:100]}", flush=True)
-
-                    # CmnWaitNonClear.asp（待機中継ページ）が出た場合、
-                    # ページ全体の再ナビゲーションを待つ（TARGET="_top" で再度フルリロード）
-                    if "CmnWait" in new_url:
-                        # 待機ページの中身を確認（診断用）
-                        try:
-                            wait_html = new_body.content()
-                            print(f"[待機ページ内容] {wait_html[:800]}", flush=True)
-                        except Exception as e:
-                            print(f"[待機ページ内容] 取得失敗: {e}", flush=True)
-                        print("[クロール] 待機ページ検出。フルページナビゲーションを待ちます…", flush=True)
-                        try:
-                            with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
-                                pass  # 自動リダイレクトを待つだけ
-                            time.sleep(2)
-                            new_body = _resolve_calendar_root(page)
-                            try:
-                                new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
-                            except Exception:
-                                pass
-                            final_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
-                            print(f"[クロール] 3〜4週目カレンダー確認: {final_url[:100]}", flush=True)
-                        except Exception as e:
-                            # フルリダイレクトがなければフレームレベルで待つ
-                            print(f"[クロール] フルナビゲーション待機タイムアウト、フレーム検索へ: {e}", flush=True)
-                            deadline2 = time.time() + 30
-                            found = False
-                            while time.time() < deadline2:
-                                for fr in page.frames:
-                                    fr_url = getattr(fr, "url", "") or ""
-                                    if "CmnWait" not in fr_url and fr_url and "about:blank" not in fr_url:
-                                        try:
-                                            fr.evaluate("1")
-                                            if fr.name == "BODY" or "W20" in fr_url:
-                                                new_body = fr
-                                                found = True
-                                                break
-                                        except Exception:
-                                            pass
-                                if found:
-                                    break
-                                time.sleep(0.5)
-                            ff = getattr(new_body, "url", "N/A") if new_body else "N/A"
-                            print(f"[クロール] フレーム検索結果: {ff[:100]}", flush=True)
+                    final_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
+                    print(f"[クロール] 3〜4週目 BODYフレームURL: {final_url[:100]}", flush=True)
 
                     # 画像ブロックを再適用
                     context.route("**/*", _route_skip_images_fonts)
