@@ -10,6 +10,8 @@ Azbil Web仮想工場 生産計画表 クロールスクリプト
 import os
 import json
 import smtplib
+import sys
+import traceback
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -118,7 +120,11 @@ def crawl():
             body_frame = next((f for f in page.frames if "W20_body" in f.url), None)
 
         # HEADフレームの読み込みを待つ
-        head_frame.wait_for_load_state("networkidle")
+        if head_frame is not None:
+            head_frame.wait_for_load_state("networkidle")
+
+        # カレンダーは多くの場合 BODY フレーム内。メインの page だけではリンクが0件になる。
+        calendar_root = body_frame if body_frame is not None else page
 
         # ── 検索条件：板金本体を選択して検索（HEADフレーム内）──
         # ラジオボタンのvalue属性は英語: BanSub/BanMain/Kumihai/Shukka
@@ -129,11 +135,11 @@ def crawl():
 
         # ── 1〜2週目と3〜4週目の2回クロール ──
         for week_range in ["1〜2週目", "3〜4週目"]:
-            jobs += scrape_calendar(page)
+            jobs += scrape_calendar(page, calendar_root)
 
             if week_range == "1〜2週目":
-                # 「次の2週」ボタンをクリックして3〜4週目へ移動
-                page.click('text=次の2週')
+                # 「次の2週」はカレンダーと同じフレーム内にあることが多い
+                calendar_root.click('text=次の2週')
                 page.wait_for_load_state("networkidle")
 
         browser.close()
@@ -141,18 +147,34 @@ def crawl():
     return jobs
 
 
-def scrape_calendar(page):
+def _detail_page_url(href):
+    """詳細画面への絶対URLを組み立てる"""
+    if not href:
+        return None
+    href = href.strip()
+    if href.startswith("http://") or href.startswith("https://"):
+        return href
+    if href.startswith("/"):
+        return f"https://v-factory.azbil.com{href}"
+    return f"https://v-factory.azbil.com/rweb/WALOG/asp/{href}"
+
+
+def scrape_calendar(page, calendar_root):
     """現在表示されているカレンダーの全ジョブ詳細を取得する"""
     jobs = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # カレンダー内の詳細アイコン（小さい画像リンク）を全て取得
-    # アイコンはtd内のaタグ（hrefにWALOG_DETAILなどの詳細URLを含む）
-    detail_links = page.locator('a[href*="WALOG_DETAIL"]').all()
+    # カレンダー内の詳細リンク（BODYフレーム内を優先。0件なら従来どおりpage全体も試す）
+    detail_links = calendar_root.locator('a[href*="WALOG_DETAIL"]').all()
+    if not detail_links:
+        detail_links = page.locator('a[href*="WALOG_DETAIL"]').all()
     detail_urls = [link.get_attribute("href") for link in detail_links]
+    print(f"詳細リンク数：{len(detail_urls)}件（この2週分の画面）")
 
     for href in detail_urls:
-        detail_url = f"https://v-factory.azbil.com/rweb/WALOG/asp/{href}"
+        detail_url = _detail_page_url(href)
+        if not detail_url:
+            continue
         detail_page = page.context.new_page()
         detail_page.goto(detail_url)
         detail_page.wait_for_load_state("networkidle")
@@ -318,34 +340,43 @@ def send_no_change_email(new_rows):
 def main():
     print("クロール開始")
 
-    # スプレッドシートに接続
+    print("[ステップ1] Googleスプレッドシートに接続しています…")
     client = get_sheet_client()
+    print("[ステップ1] 接続OK")
 
-    # 前回データを読み込む
+    print("[ステップ2] シート「最新データ」を読み込んでいます…")
     old_rows = read_sheet(client, SHEET_MAIN)
-    print(f"前回データ：{len(old_rows)}件")
+    print(f"[ステップ2] OK（前回データ：{len(old_rows)}件）")
 
-    # 今回のクロール実行
+    print("[ステップ3] サイトをクロールしています（時間がかかることがあります）…")
     new_rows = crawl()
-    print(f"今回のクロール結果：{len(new_rows)}件")
+    print(f"[ステップ3] OK（今回のクロール結果：{len(new_rows)}件）")
 
-    # 変更を検知
+    print("[ステップ4] 前回との差分を計算しています…")
     changes = detect_changes(old_rows, new_rows)
-    print(f"変更件数：{len(changes)}件")
+    print(f"[ステップ4] OK（変更件数：{len(changes)}件）")
 
-    # スプレッドシートを更新（前回データをバックアップ → 最新データを書き込み）
+    print("[ステップ5] スプレッドシートに書き込んでいます…")
     write_sheet(client, SHEET_BACKUP, old_rows)
-    write_sheet(client, SHEET_MAIN,   new_rows)
+    print("[ステップ5a] バックアップシート「前回データ」更新OK")
+    write_sheet(client, SHEET_MAIN, new_rows)
+    print("[ステップ5b] メインシート「最新データ」更新OK")
     print("スプレッドシート更新完了")
 
-    # メール送信
+    print("[ステップ6] メールを送っています…")
     if changes:
         send_email(changes, new_rows)
     else:
         send_no_change_email(new_rows)
+    print("[ステップ6] OK")
 
     print("処理完了")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        print("--- エラーが発生しました（以下をGitHubのログ全文として控えてください）---")
+        traceback.print_exc()
+        sys.exit(1)
