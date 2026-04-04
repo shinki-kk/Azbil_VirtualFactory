@@ -165,16 +165,98 @@ def _detail_page_url(href):
     return f"https://v-factory.azbil.com/rweb/WALOG/asp/{href}"
 
 
+def _looks_like_job_detail_href(href):
+    """工程詳細へ飛ぶリンクかどうか（表記揺れ・大文字小文字を許容）"""
+    if not href:
+        return False
+    u = href.strip()
+    low = u.lower()
+    if low.startswith("javascript:") or low.startswith("#") or low.startswith("mailto:"):
+        return False
+    if "walog_detail" in low:
+        return True
+    if "walog" in low and "detail" in low:
+        return True
+    return False
+
+
+def _gather_hrefs_from_frame(fr):
+    """フレーム内の a / area の href を列挙（画像マップ対応）"""
+    collected = []
+    expr = "els => els.map(e => e.getAttribute('href')).filter(h => h && h.trim())"
+    for sel in ("a[href]", "area[href]"):
+        try:
+            collected.extend(fr.eval_on_selector_all(sel, expr))
+        except Exception:
+            pass
+    return collected
+
+
+def _iter_calendar_frames(calendar_root, page):
+    """カレンダー候補となるフレーム（BODY とその子 iframe）を列挙"""
+    if calendar_root is page:
+        return list(page.frames)
+    out = []
+
+    def walk(fr):
+        out.append(fr)
+        for ch in fr.child_frames:
+            walk(ch)
+
+    walk(calendar_root)
+    return out
+
+
+def _collect_detail_hrefs(calendar_root, page):
+    """
+    詳細URLを重複なく収集。
+    実サイトでは WALOG_DETAIL 以外のファイル名・area タグ・子フレームの可能性がある。
+    """
+    ordered = []
+    seen = set()
+    all_raw = []
+
+    def process_frame(fr):
+        try:
+            part = _gather_hrefs_from_frame(fr)
+        except Exception:
+            return
+        all_raw.extend(part)
+        for h in part:
+            if not _looks_like_job_detail_href(h):
+                continue
+            key = _detail_page_url(h) or h
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(h)
+
+    for fr in _iter_calendar_frames(calendar_root, page):
+        process_frame(fr)
+
+    if not ordered:
+        for fr in page.frames:
+            process_frame(fr)
+
+    if not ordered:
+        sample = []
+        sset = set()
+        for s in all_raw:
+            if s and s not in sset and len(sample) < 15:
+                sset.add(s)
+                sample.append(s)
+        if sample:
+            print(f"詳細候補0件。画面内のリンク例（最大15）: {sample}")
+
+    return ordered
+
+
 def scrape_calendar(page, calendar_root):
     """現在表示されているカレンダーの全ジョブ詳細を取得する"""
     jobs = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # カレンダー内の詳細リンク（BODYフレーム内を優先。0件なら従来どおりpage全体も試す）
-    detail_links = calendar_root.locator('a[href*="WALOG_DETAIL"]').all()
-    if not detail_links:
-        detail_links = page.locator('a[href*="WALOG_DETAIL"]').all()
-    detail_urls = [link.get_attribute("href") for link in detail_links]
+    detail_urls = _collect_detail_hrefs(calendar_root, page)
     print(f"詳細リンク数：{len(detail_urls)}件（この2週分の画面）")
 
     for href in detail_urls:
