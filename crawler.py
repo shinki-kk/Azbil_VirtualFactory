@@ -230,9 +230,23 @@ def crawl():
             jobs += scrape_calendar(page, calendar_root)
 
             if week_range == "1〜2週目":
-                calendar_root = _resolve_calendar_root(page)
-                calendar_root.click('text=次の2週')
-                page.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
+                # 「次の2週」ボタンはHEAD/BODYどちらかにある。全フレームから探してクリック
+                clicked = False
+                for fr in [page] + page.frames:
+                    try:
+                        btn = fr.locator('text=次の2週')
+                        if btn.count() > 0:
+                            btn.first.click()
+                            clicked = True
+                            print("[クロール] 「次の2週」クリック成功", flush=True)
+                            break
+                    except Exception:
+                        pass
+                if not clicked:
+                    print("[クロール] 警告：「次の2週」ボタンが見つかりませんでした", flush=True)
+                time.sleep(3)   # フレーム差し替わりを待つ
+                page.screenshot(path="screenshot_calendar_week34.png")
+                print("[クロール] 3〜4週目カレンダーのスクリーンショットを保存しました", flush=True)
 
         browser.close()
 
