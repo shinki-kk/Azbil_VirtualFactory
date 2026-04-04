@@ -321,13 +321,15 @@ def scrape_calendar(page, calendar_root):
             try:
                 detail_page.goto(
                     detail_url,
-                    wait_until="domcontentloaded",
+                    wait_until="load",
                     timeout=_PW_DETAIL_NAV_MS,
                 )
-                time.sleep(0.15)
-                # 最初の1件だけスクリーンショットを保存（ページ構造の確認用）
+                time.sleep(0.5)
+                # 最初の1件だけスクリーンショットと詳細情報を保存（ページ構造の確認用）
                 if i == 1:
-                    detail_page.screenshot(path="screenshot_detail.png")
+                    print(f"  [確認] 遷移先URL: {detail_page.url}", flush=True)
+                    print(f"  [確認] ページタイトル: {detail_page.title()}", flush=True)
+                    detail_page.screenshot(path="screenshot_detail.png", full_page=True)
                     print("  （screenshot_detail.png を保存しました）", flush=True)
                 job = extract_job_detail(detail_page, now)
                 if job:
