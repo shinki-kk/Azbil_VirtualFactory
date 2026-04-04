@@ -9,6 +9,7 @@ Azbil Web仮想工場 生産計画表 クロールスクリプト
 
 import base64
 import os
+import re
 import json
 import smtplib
 import sys
@@ -384,7 +385,8 @@ def extract_job_detail(page):
             return ""
 
     calendar_date = get_bkgdate()                        # カレンダー日付（URLから）
-    koujiban      = get_input("QS_WorkNo")               # 工事番号
+    koujiban_raw  = get_input("QS_WorkNo")
+    koujiban      = re.sub(r'^\d+-', '', koujiban_raw)   # 先頭の「1-」などの数字+ハイフンを除去
     gaiken        = get_input("QS_DwgNo")                # 外形図番
     banshu        = get_td_text("盤種類")                 # 盤種類
     honsuu        = get_input("QS_Ukeire")               # 本数
