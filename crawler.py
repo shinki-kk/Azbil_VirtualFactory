@@ -353,14 +353,14 @@ def scrape_calendar(page, calendar_root):
                     print(f"  [確認] ページタイトル: {detail_page.title()}", flush=True)
                     detail_page.screenshot(path="screenshot_detail.png", full_page=True)
                     print("  （screenshot_detail.png を保存しました）", flush=True)
-                    # input要素の name と value を全件出力してセレクター確認に使う
-                    inputs = detail_page.eval_on_selector_all(
-                        "input",
-                        "els => els.map(e => ({name: e.name, type: e.type, value: e.value}))"
+                    # select要素の name と value を出力（盤種類の特定用）
+                    selects = detail_page.eval_on_selector_all(
+                        "select",
+                        "els => els.map(e => ({name: e.name, value: e.value}))"
                     )
-                    print("  [HTML確認] input要素一覧:", flush=True)
-                    for inp in inputs:
-                        print(f"    name={inp['name']} type={inp['type']} value={inp['value']}", flush=True)
+                    print("  [HTML確認] select要素一覧:", flush=True)
+                    for s in selects:
+                        print(f"    name={s['name']} value={s['value']}", flush=True)
                 job = extract_job_detail(detail_page, now)
                 if job:
                     jobs.append(job)
@@ -374,42 +374,25 @@ def scrape_calendar(page, calendar_root):
 
 def extract_job_detail(page, now):
     """工程詳細画面から必要項目を取得する"""
-    def get_value(label):
-        """ラベルに対応する入力欄の値を取得する"""
+    def get_input(name):
         try:
-            # ラベルテキストを含むtdの次のtd内のinput/textを取得
-            value = page.locator(f'td:has-text("{label}") + td input').first.input_value()
-            return value.strip()
+            return page.locator(f'input[name="{name}"]').first.input_value().strip()
         except Exception:
             return ""
 
-    def get_text(label):
-        """ラベルに対応するtdのテキストを取得する"""
+    def get_select(name):
         try:
-            value = page.locator(f'td:has-text("{label}") + td').first.inner_text()
-            return value.strip()
+            return page.locator(f'select[name="{name}"]').first.input_value().strip()
         except Exception:
             return ""
 
-    # 板金・塗装の予定日は「出図」セクションの特定セルから取得
-    def get_bankin_date():
-        try:
-            # 「板金・塗装」列の「予定」行のセルを取得
-            value = page.locator('td:has-text("板金・塗装")').first
-            # 予定行（2行目）の値
-            date_cell = page.locator('table:has(td:has-text("板金・塗装")) tr').nth(1).locator('td').nth(1)
-            return date_cell.inner_text().strip()
-        except Exception:
-            return ""
+    koujiban    = get_input("QS_WorkNo")        # 工事番号
+    gaiken      = get_input("QS_DwgNo")         # 外形図番
+    banshu      = get_select("QS_BanType") or get_select("QS_BanShu") or ""  # 盤種類（要確認）
+    honsuu      = get_input("QS_Ukeire")        # 本数
+    bankin_date = get_input("QS_PlanKumihai")   # 板金・塗装（予定日）※要確認
+    kumiai      = get_input("QS_KumiCorpName")  # 組配協力会社名
 
-    koujiban    = get_value("工事番号")
-    gaiken      = get_value("外形図番")
-    banshu      = get_value("盤種類")
-    honsuu      = get_value("本数")
-    bankin_date = get_bankin_date()
-    kumiai      = get_value("組配協力会社名")
-
-    # 工事番号が取れなかった場合はスキップ
     if not koujiban:
         return None
 
