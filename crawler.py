@@ -247,14 +247,13 @@ def _looks_like_job_detail_href(href):
 
 
 def _gather_hrefs_from_frame(fr):
-    """フレーム内の a / area の href を列挙（画像マップ対応）"""
+    """フレーム内のカレンダーアイコン（calendar.jpg）を含むリンクのhrefを列挙"""
     collected = []
     expr = "els => els.map(e => e.getAttribute('href')).filter(h => h && h.trim())"
-    for sel in ("a[href]", "area[href]"):
-        try:
-            collected.extend(fr.eval_on_selector_all(sel, expr))
-        except Exception:
-            pass
+    try:
+        collected.extend(fr.eval_on_selector_all("a:has(img[src*='calendar.jpg'])", expr))
+    except Exception:
+        pass
     return collected
 
 
