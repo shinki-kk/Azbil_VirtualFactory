@@ -165,15 +165,32 @@ def format_sheet(ws, rows):
 # ──────────────────────────────────────────
 # クロール処理
 # ──────────────────────────────────────────
+def _is_frame_alive(fr):
+    """フレームが生きている（detached でない）か確認する"""
+    try:
+        fr.evaluate("1")
+        return True
+    except Exception:
+        return False
+
+
 def _resolve_calendar_root(page):
     """
     カレンダーがある BODY フレームを返す。
     検索ボタンや「次の2週」でフレームが差し替わると、以前の Frame は detached になるため毎回取り直す。
+    detached なフレームはスキップし、生きているフレームだけを返す。
     """
+    # name="BODY" で見つかっても detached なら使わない
     body = page.frame(name="BODY")
-    if body is None:
-        body = next((f for f in page.frames if f.url and "W20_body" in f.url), None)
-    return body if body is not None else page
+    if body is not None and _is_frame_alive(body):
+        return body
+
+    # name で見つからない場合、URL に "W20_body" を含む生きたフレームを探す
+    for f in page.frames:
+        if f.url and "W20_body" in f.url and _is_frame_alive(f):
+            return f
+
+    return page
 
 
 def crawl():
@@ -276,12 +293,29 @@ def crawl():
                         print(f"[クロール] CmnWait後の遷移タイムアウト: {e}", flush=True)
 
                     # BODYフレームの読み込みを待つ
+                    # フレームが完全にリロードされるまでリトライする
                     time.sleep(2)
-                    new_body = _resolve_calendar_root(page)
-                    try:
-                        new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
-                    except Exception:
-                        pass
+                    new_body = None
+                    for attempt in range(10):
+                        candidate = _resolve_calendar_root(page)
+                        if candidate is not page and _is_frame_alive(candidate):
+                            try:
+                                candidate.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
+                                # カレンダーアイコンが存在するか確認（新しいページが読み込まれた証拠）
+                                icon_count = candidate.locator("img[src*='calendar.jpg']").count()
+                                if icon_count > 0:
+                                    new_body = candidate
+                                    print(f"[クロール] 新BODYフレーム確認OK（アイコン{icon_count}個、試行{attempt+1}回目）", flush=True)
+                                    break
+                            except Exception:
+                                pass
+                        print(f"[クロール] BODYフレーム待機中…（試行{attempt+1}回目）", flush=True)
+                        time.sleep(2)
+
+                    if new_body is None:
+                        new_body = _resolve_calendar_root(page)
+                        print("[クロール] 警告：新BODYフレームの確認がタイムアウトしました", flush=True)
+
                     final_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
                     print(f"[クロール] 3〜4週目 BODYフレームURL: {final_url[:100]}", flush=True)
 
@@ -369,6 +403,9 @@ def _looks_like_job_detail_href(href):
 
 def _gather_hrefs_from_frame(fr):
     """フレーム内のカレンダーアイコン（calendar.jpg）を含むリンクのhrefを列挙"""
+    # detached なフレームはスキップ
+    if not _is_frame_alive(fr):
+        return []
     collected = []
     expr = "els => els.map(e => e.getAttribute('href')).filter(h => h && h.trim())"
     try:
@@ -380,15 +417,16 @@ def _gather_hrefs_from_frame(fr):
 
 
 def _iter_calendar_frames(calendar_root, page):
-    """カレンダー候補となるフレーム（BODY とその子 iframe）を列挙"""
+    """カレンダー候補となるフレーム（BODY とその子 iframe）を列挙。detached フレームは除外。"""
     if calendar_root is page:
-        return list(page.frames)
+        return [f for f in page.frames if _is_frame_alive(f)]
     out = []
 
     def walk(fr):
-        out.append(fr)
-        for ch in fr.child_frames:
-            walk(ch)
+        if _is_frame_alive(fr):
+            out.append(fr)
+            for ch in fr.child_frames:
+                walk(ch)
 
     walk(calendar_root)
     return out
@@ -424,7 +462,8 @@ def _collect_detail_hrefs(calendar_root, page):
 
     if not ordered:
         for fr in page.frames:
-            process_frame(fr)
+            if _is_frame_alive(fr):
+                process_frame(fr)
 
     if not ordered:
         sample = []
