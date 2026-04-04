@@ -235,7 +235,13 @@ def crawl():
                 calendar_root = _resolve_calendar_root(page)
                 with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
                     calendar_root.locator('input[name="QS_NextWeek"]').click()
-                time.sleep(2)  # フレーム再構築を待つ
+                # フレームセットのload後、BODYフレームの再構築を待つ
+                new_body = _resolve_calendar_root(page)
+                try:
+                    new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
+                except Exception:
+                    pass
+                time.sleep(2)
                 print("[クロール] 3〜4週目カレンダーに移動しました", flush=True)
 
         browser.close()
