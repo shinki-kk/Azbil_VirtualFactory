@@ -231,52 +231,45 @@ def crawl():
 
             if week_range == "1〜2週目":
                 # ── 「次の2週」ボタンで3〜4週目へ移動 ──
-                calendar_root = _resolve_calendar_root(page)
-                old_url = getattr(calendar_root, "url", "") or ""
-                print(f"[クロール] クリック前 BODYフレームURL: {old_url[:100]}", flush=True)
-
-                # ボタンをクリック（TARGET="_top" なのでトップフレームがリロードされる）
-                calendar_root.locator('input[name="QS_NextWeek"]').click()
-
-                # BODYフレームのURLが変わるまで最大60秒待つ
-                new_body = None
-                deadline = time.time() + 60
-                while time.time() < deadline:
-                    for fr in page.frames:
-                        fr_url = getattr(fr, "url", "") or ""
-                        if fr_url == old_url or not fr_url:
-                            continue
-                        if "W20_body" not in fr_url and fr.name != "BODY":
-                            continue
-                        try:
-                            fr.evaluate("1")   # detached なら例外
-                            new_body = fr
+                # detachedフレームへのクリックは無効なため、全フレームを走査して
+                # 生きているフレームの中からボタンを探す
+                button_frame = None
+                for fr in page.frames:
+                    try:
+                        fr.evaluate("1")           # detached なら例外
+                        cnt = fr.locator('input[name="QS_NextWeek"]').count()
+                        if cnt > 0:
+                            button_frame = fr
                             break
-                        except Exception:
-                            pass
-                    if new_body is not None:
-                        break
-                    time.sleep(0.5)
+                    except Exception:
+                        pass
 
-                if new_body is not None:
-                    new_url = getattr(new_body, "url", "N/A")
-                    print(f"[クロール] クリック後 BODYフレームURL: {new_url[:100]}", flush=True)
+                if button_frame is None:
+                    print("[クロール] 次の2週ボタンが見つかりませんでした。スキップします。", flush=True)
+                else:
+                    btn_url = getattr(button_frame, "url", "N/A")
+                    print(f"[クロール] 次の2週ボタン発見: frame={button_frame.name!r} url={btn_url[:80]}", flush=True)
+
+                    # TARGET="_top" なのでトップフレームがリロードされる
+                    with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
+                        button_frame.locator('input[name="QS_NextWeek"]').click()
+
+                    # フレームセット再構築を少し待つ
+                    time.sleep(2)
+                    new_body = _resolve_calendar_root(page)
                     try:
                         new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
                     except Exception:
                         pass
-                else:
-                    # URLが変わらなかった場合：同名フレームをそのまま使う
-                    new_body = page.frame(name="BODY")
                     new_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
-                    print(f"[クロール] URLが変化しませんでした。現在のBODYURL: {new_url[:100]}", flush=True)
+                    print(f"[クロール] 移動後 BODYフレームURL: {new_url[:100]}", flush=True)
 
-                # スクリーンショット（page全体で確実に撮る）
-                try:
-                    page.screenshot(path="screenshot_calendar_week34.png")
-                    print("[クロール] スクリーンショット保存OK (screenshot_calendar_week34.png)", flush=True)
-                except Exception as e:
-                    print(f"[クロール] スクリーンショット失敗: {e}", flush=True)
+                    # スクリーンショット
+                    try:
+                        page.screenshot(path="screenshot_calendar_week34.png")
+                        print("[クロール] スクリーンショット保存OK", flush=True)
+                    except Exception as e:
+                        print(f"[クロール] スクリーンショット失敗: {e}", flush=True)
 
                 print("[クロール] 3〜4週目カレンダーに移動しました", flush=True)
 
