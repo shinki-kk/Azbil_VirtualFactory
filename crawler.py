@@ -104,7 +104,9 @@ def crawl():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # browser.new_page() だけのとき、環境によっては context.new_page() が使えない
+        context = browser.new_context()
+        page = context.new_page()
 
         # ── ログイン ──
         page.goto(SITE_URL)
