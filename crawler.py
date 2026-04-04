@@ -243,103 +243,126 @@ def crawl():
         page.screenshot(path="screenshot_calendar.png")
 
         # カレンダー表示後は詳細だけ連続で開く。タブの作り直しを減らし、画像等は落とす
-        context.route("**/*", _route_skip_images_fonts)
+        # ただし、href収集中は画像ブロックしない（calendar.jpgが必要）
+        # → href収集を全部済ませてから画像ブロックを有効にする
 
-        # ── 1〜2週目と3〜4週目の2回クロール ──
-        # 1〜2週目のhrefを記録して、3〜4週目で新しいデータが出たか判定に使う
-        first_half_hrefs = set()
+        # ── フェーズ1：1〜2週目と3〜4週目のhrefをすべて先に収集する ──
+        # （詳細ページを開くとASPセッションが壊れるため、ボタン操作を先に済ませる）
+        all_detail_urls = []
 
-        for week_range in ["1〜2週目", "3〜4週目"]:
-            # 検索直後・週切り替え直後は必ずフレームを取り直す（古い Frame は detached になる）
-            calendar_root = _resolve_calendar_root(page)
-            jobs += scrape_calendar(page, calendar_root)
+        # 1〜2週目のhref収集
+        calendar_root = _resolve_calendar_root(page)
+        week12_urls = _collect_detail_hrefs(calendar_root, page)
+        print(f"[クロール] 1〜2週目 詳細リンク数：{len(week12_urls)}件", flush=True)
+        all_detail_urls.extend(week12_urls)
 
-            if week_range == "1〜2週目":
-                # 1〜2週目で取得したhrefを記録
-                first_half_hrefs = set(_collect_detail_hrefs(calendar_root, page))
-                print(f"[クロール] 1〜2週目のhref記録: {len(first_half_hrefs)}件", flush=True)
+        # ── 「次の2週」ボタンで3〜4週目へ移動（詳細ページをまだ開いていないのでセッションは健全）──
+        button_frame = None
+        for fr in page.frames:
+            try:
+                fr.evaluate("1")           # detached なら例外
+                cnt = fr.locator('input[name="QS_NextWeek"]').count()
+                if cnt > 0:
+                    button_frame = fr
+                    break
+            except Exception:
+                pass
 
-                # ── 「次の2週」ボタンで3〜4週目へ移動 ──
-                # detachedフレームへのクリックは無効なため、全フレームを走査して
-                # 生きているフレームの中からボタンを探す
-                button_frame = None
-                for fr in page.frames:
+        if button_frame is None:
+            print("[クロール] 次の2週ボタンが見つかりませんでした。スキップします。", flush=True)
+        else:
+            btn_url = getattr(button_frame, "url", "N/A")
+            print(f"[クロール] 次の2週ボタン発見: frame={button_frame.name!r} url={btn_url[:80]}", flush=True)
+
+            # TARGET="_top" なのでトップフレームがリロードされる
+            with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
+                button_frame.locator('input[name="QS_NextWeek"]').click()
+
+            # CmnWaitNonClear.asp → W20.asp へのリダイレクトを待つ
+            print(f"[クロール] 移動後ページURL: {page.url[:100]}", flush=True)
+            try:
+                page.wait_for_url(
+                    lambda url: "CmnWait" not in url,
+                    timeout=_PW_TIMEOUT_MS,
+                )
+                print(f"[クロール] 最終ページURL: {page.url[:100]}", flush=True)
+            except Exception as e:
+                print(f"[クロール] CmnWait後の遷移タイムアウト: {e}", flush=True)
+
+            # BODYフレームの読み込みを待つ
+            time.sleep(3)
+            first_half_set = set(week12_urls)
+            new_body = None
+            for attempt in range(15):
+                candidate = _resolve_calendar_root(page)
+                if candidate is not page and _is_frame_alive(candidate):
                     try:
-                        fr.evaluate("1")           # detached なら例外
-                        cnt = fr.locator('input[name="QS_NextWeek"]').count()
-                        if cnt > 0:
-                            button_frame = fr
+                        candidate.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
+                        new_hrefs = _collect_detail_hrefs(candidate, page)
+                        if new_hrefs and set(new_hrefs) != first_half_set:
+                            new_body = candidate
+                            print(f"[クロール] 3〜4週目の新データ確認OK（{len(new_hrefs)}件、試行{attempt+1}回目）", flush=True)
+                            all_detail_urls.extend(new_hrefs)
                             break
+                        else:
+                            print(f"[クロール] DOMまだ更新されていない（href同一、試行{attempt+1}回目）", flush=True)
                     except Exception:
                         pass
-
-                if button_frame is None:
-                    print("[クロール] 次の2週ボタンが見つかりませんでした。スキップします。", flush=True)
                 else:
-                    btn_url = getattr(button_frame, "url", "N/A")
-                    print(f"[クロール] 次の2週ボタン発見: frame={button_frame.name!r} url={btn_url[:80]}", flush=True)
+                    print(f"[クロール] BODYフレーム待機中…（試行{attempt+1}回目）", flush=True)
+                time.sleep(2)
 
-                    # 画像ブロックを一時解除（待機ページのJavaScriptが正常動作するよう）
-                    context.unroute("**/*")
+            if new_body is None:
+                print("[クロール] 警告：3〜4週目のDOM更新が確認できませんでした", flush=True)
 
-                    # TARGET="_top" なのでトップフレームがリロードされる
-                    with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
-                        button_frame.locator('input[name="QS_NextWeek"]').click()
+            # スクリーンショット
+            try:
+                page.screenshot(path="screenshot_calendar_week34.png")
+                print("[クロール] 3〜4週目スクリーンショット保存OK", flush=True)
+            except Exception as e:
+                print(f"[クロール] スクリーンショット失敗: {e}", flush=True)
 
-                    # CmnWaitNonClear.asp は HEAD フレームの JS が window.top を W20.asp へ
-                    # リダイレクトする中継ページ。リダイレクトが速すぎて expect_navigation を
-                    # 使うと race condition になるため wait_for_url で「現在 or 将来」を待つ
-                    print(f"[クロール] 移動後ページURL: {page.url[:100]}", flush=True)
+        # ── フェーズ2：収集したURLをもとに詳細ページを取得 ──
+        # URL重複を除去（順序維持）
+        seen = set()
+        unique_urls = []
+        for u in all_detail_urls:
+            if u not in seen:
+                seen.add(u)
+                unique_urls.append(u)
+        all_detail_urls = unique_urls
+
+        print(f"[クロール] 全詳細リンク数（重複除去後）：{len(all_detail_urls)}件", flush=True)
+
+        # テストモード
+        if os.environ.get("TEST_MODE") == "true":
+            all_detail_urls = all_detail_urls[:6]  # 各週3件ずつ程度
+            print(f"  ※テストモード：{len(all_detail_urls)}件に絞って取得します", flush=True)
+
+        # 画像ブロックを有効にして転送量を削減
+        context.route("**/*", _route_skip_images_fonts)
+
+        if all_detail_urls:
+            detail_page = page.context.new_page()
+            detail_page.set_default_navigation_timeout(_PW_DETAIL_NAV_MS)
+            detail_page.set_default_timeout(5_000)
+            try:
+                for i, detail_url in enumerate(all_detail_urls, start=1):
+                    print(f"  詳細取得 {i}/{len(all_detail_urls)} …", flush=True)
                     try:
-                        page.wait_for_url(
-                            lambda url: "CmnWait" not in url,
-                            timeout=_PW_TIMEOUT_MS,
+                        detail_page.goto(
+                            detail_url,
+                            wait_until="load",
+                            timeout=_PW_DETAIL_NAV_MS,
                         )
-                        print(f"[クロール] 最終ページURL: {page.url[:100]}", flush=True)
+                        time.sleep(0.5)
+                        job = extract_job_detail(detail_page)
+                        if job:
+                            jobs.append(job)
                     except Exception as e:
-                        print(f"[クロール] CmnWait後の遷移タイムアウト: {e}", flush=True)
-
-                    # BODYフレームの読み込みを待つ
-                    # DOMが実際に更新されるまでリトライ（hrefが変わったかで判定）
-                    time.sleep(3)
-                    new_body = None
-                    for attempt in range(15):
-                        candidate = _resolve_calendar_root(page)
-                        if candidate is not page and _is_frame_alive(candidate):
-                            try:
-                                candidate.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
-                                # 新しいカレンダーのhrefを取得して、1〜2週目と異なるか確認
-                                new_hrefs = set(_collect_detail_hrefs(candidate, page))
-                                if new_hrefs and new_hrefs != first_half_hrefs:
-                                    new_body = candidate
-                                    print(f"[クロール] 3〜4週目の新データ確認OK（{len(new_hrefs)}件、試行{attempt+1}回目）", flush=True)
-                                    break
-                                else:
-                                    print(f"[クロール] DOMまだ更新されていない（href同一、試行{attempt+1}回目）", flush=True)
-                            except Exception:
-                                pass
-                        else:
-                            print(f"[クロール] BODYフレーム待機中…（試行{attempt+1}回目）", flush=True)
-                        time.sleep(2)
-
-                    if new_body is None:
-                        new_body = _resolve_calendar_root(page)
-                        print("[クロール] 警告：3〜4週目のDOM更新が確認できませんでした", flush=True)
-
-                    final_url = getattr(new_body, "url", "N/A") if new_body else "N/A"
-                    print(f"[クロール] 3〜4週目 BODYフレームURL: {final_url[:100]}", flush=True)
-
-                    # 画像ブロックを再適用
-                    context.route("**/*", _route_skip_images_fonts)
-
-                    # スクリーンショット
-                    try:
-                        page.screenshot(path="screenshot_calendar_week34.png")
-                        print("[クロール] スクリーンショット保存OK", flush=True)
-                    except Exception as e:
-                        print(f"[クロール] スクリーンショット失敗: {e}", flush=True)
-
-                print("[クロール] 3〜4週目カレンダーに移動しました", flush=True)
+                        print(f"  （スキップ {i}）{e}", flush=True)
+            finally:
+                detail_page.close()
 
         browser.close()
 
