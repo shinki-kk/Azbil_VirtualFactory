@@ -102,6 +102,64 @@ def write_sheet(client, sheet_name, rows, run_datetime=""):
 
     meta_row = [f"取得日時：{run_datetime}"] if run_datetime else [""]
     ws.update([meta_row, HEADERS] + rows)
+    format_sheet(ws, rows)
+
+
+def format_sheet(ws, rows):
+    """スプレッドシートの書式を設定する"""
+    num_cols = len(HEADERS)
+    requests = []
+
+    # ── ヘッダー行（2行目）：背景色・白太字・中央揃え ──
+    requests.append({
+        "repeatCell": {
+            "range": {
+                "sheetId": ws.id,
+                "startRowIndex": 1,   # 0-based で2行目
+                "endRowIndex": 2,
+                "startColumnIndex": 0,
+                "endColumnIndex": num_cols,
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "backgroundColor": {"red": 0.27, "green": 0.51, "blue": 0.71},
+                    "textFormat": {
+                        "bold": True,
+                        "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+                    },
+                    "horizontalAlignment": "CENTER",
+                }
+            },
+            "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+        }
+    })
+
+    # ── 積上日グループの区切り：グループが変わる行の上に横罫線 ──
+    # データは3行目以降（0-based index 2〜）
+    prev_date = None
+    for i, row in enumerate(rows):
+        current_date = row[0] if row else ""
+        if prev_date is not None and current_date != prev_date:
+            sheet_row_index = i + 2   # 0-based: 1行目=meta, 2行目=header, 3行目〜=data
+            requests.append({
+                "updateBorders": {
+                    "range": {
+                        "sheetId": ws.id,
+                        "startRowIndex": sheet_row_index,
+                        "endRowIndex": sheet_row_index + 1,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": num_cols,
+                    },
+                    "top": {
+                        "style": "SOLID_MEDIUM",
+                        "color": {"red": 0.0, "green": 0.0, "blue": 0.0},
+                    },
+                }
+            })
+        prev_date = current_date
+
+    if requests:
+        ws.spreadsheet.batch_update({"requests": requests})
 
 
 # ──────────────────────────────────────────
