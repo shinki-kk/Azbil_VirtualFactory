@@ -107,6 +107,7 @@ def crawl():
         # browser.new_page() だけのとき、環境によっては context.new_page() が使えない
         context = browser.new_context()
         page = context.new_page()
+        print("[クロール] ブラウザ起動・サイトへ接続中…", flush=True)
 
         # ── ログイン ──
         page.goto(SITE_URL)
@@ -276,9 +277,10 @@ def scrape_calendar(page, calendar_root):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     detail_urls = _collect_detail_hrefs(calendar_root, page)
-    print(f"詳細リンク数：{len(detail_urls)}件（この2週分の画面）")
+    print(f"詳細リンク数：{len(detail_urls)}件（この2週分の画面）", flush=True)
 
-    for detail_url in detail_urls:
+    for i, detail_url in enumerate(detail_urls, start=1):
+        print(f"  詳細取得 {i}/{len(detail_urls)} …", flush=True)
         detail_page = page.context.new_page()
         detail_page.goto(detail_url)
         detail_page.wait_for_load_state("networkidle")

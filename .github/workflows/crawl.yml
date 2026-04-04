@@ -27,13 +27,14 @@ jobs:
 
       - name: クロールを実行
         env:
+          PYTHONUNBUFFERED:           "1"  # GitHub上で print がすぐログに出るようにする
           SITE_LOGIN_ID:              ${{ secrets.SITE_LOGIN_ID }}
           SITE_LOGIN_PASSWORD:        ${{ secrets.SITE_LOGIN_PASSWORD }}
           MAIL_PASSWORD:              ${{ secrets.MAIL_PASSWORD }}
           SPREADSHEET_ID:             ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_SHEETS_CREDENTIALS:  ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
         run: |
-          python crawler.py
+          python -u crawler.py
 
       - name: スクリーンショットを保存
         if: always()
