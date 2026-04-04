@@ -347,18 +347,6 @@ def scrape_calendar(page, calendar_root):
                     timeout=_PW_DETAIL_NAV_MS,
                 )
                 time.sleep(0.5)
-                # 最初の1件だけスクリーンショットと詳細情報を保存（ページ構造の確認用）
-                if i == 1:
-                    print(f"  [確認] 遷移先URL: {detail_page.url}", flush=True)
-                    print(f"  [確認] ページタイトル: {detail_page.title()}", flush=True)
-                    detail_page.screenshot(path="screenshot_detail.png", full_page=True)
-                    print("  （screenshot_detail.png を保存しました）", flush=True)
-                    # 盤種類の取得方法を調査（tdのテキスト）
-                    try:
-                        banshu_candidate = detail_page.locator('td:has-text("盤種類") + td').first.inner_text(timeout=3000).strip()
-                        print(f"  [HTML確認] 盤種類候補(tdテキスト): {banshu_candidate!r}", flush=True)
-                    except Exception as e:
-                        print(f"  [HTML確認] 盤種類td取得失敗: {e}", flush=True)
                 job = extract_job_detail(detail_page, now)
                 if job:
                     jobs.append(job)
@@ -378,17 +366,18 @@ def extract_job_detail(page, now):
         except Exception:
             return ""
 
-    def get_select(name):
+    def get_td_text(label):
+        """ラベルTD → コロンTD → 値TD の順で2つ隣のTDテキストを取得"""
         try:
-            return page.locator(f'select[name="{name}"]').first.input_value().strip()
+            return page.locator(f'td:has-text("{label}") + td + td').first.inner_text(timeout=3000).strip()
         except Exception:
             return ""
 
     koujiban    = get_input("QS_WorkNo")        # 工事番号
     gaiken      = get_input("QS_DwgNo")         # 外形図番
-    banshu      = get_select("QS_BanType") or get_select("QS_BanShu") or ""  # 盤種類（要確認）
+    banshu      = get_td_text("盤種類")          # 盤種類（TDテキスト）
     honsuu      = get_input("QS_Ukeire")        # 本数
-    bankin_date = get_input("QS_PlanKumihai")   # 板金・塗装（予定日）※要確認
+    bankin_date = get_input("QS_PlanKumihai")   # 板金・塗装（予定日）
     kumiai      = get_input("QS_KumiCorpName")  # 組配協力会社名
 
     if not koujiban:
