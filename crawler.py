@@ -235,13 +235,39 @@ def crawl():
                 calendar_root = _resolve_calendar_root(page)
                 with page.expect_navigation(wait_until="load", timeout=_PW_TIMEOUT_MS):
                     calendar_root.locator('input[name="QS_NextWeek"]').click()
-                # フレームセットのload後、BODYフレームの再構築を待つ
-                new_body = _resolve_calendar_root(page)
-                try:
-                    new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
-                except Exception:
-                    pass
-                time.sleep(2)
+                # フレームセットのload後、新しいBODYフレームが生きているか確認しながら待つ
+                new_body = None
+                deadline = time.time() + 30
+                while time.time() < deadline:
+                    fr = page.frame(name="BODY")
+                    if fr is None:
+                        fr = next((f for f in page.frames if f.url and "W20_body" in f.url), None)
+                    if fr is not None:
+                        try:
+                            fr.evaluate("1")   # detached なら例外が出る
+                            new_body = fr
+                            break
+                        except Exception:
+                            pass
+                    time.sleep(0.3)
+                # デバッグ：BODYフレームの状態を確認
+                if new_body is not None:
+                    body_url = getattr(new_body, "url", "N/A")
+                    print(f"[クロール] BODYフレーム取得OK: {body_url[:100]}", flush=True)
+                    try:
+                        new_body.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
+                    except Exception:
+                        pass
+                    try:
+                        new_body.wait_for_selector(
+                            'a:has(img[src*="calendar.jpg"])',
+                            timeout=_PW_TIMEOUT_MS,
+                        )
+                        print("[クロール] 3〜4週目のカレンダーアイコンを確認しました", flush=True)
+                    except Exception as e:
+                        print(f"[クロール] 3〜4週目：カレンダーアイコンなし ({e})", flush=True)
+                else:
+                    print("[クロール] BODYフレームが見つかりませんでした", flush=True)
                 print("[クロール] 3〜4週目カレンダーに移動しました", flush=True)
 
         browser.close()
@@ -320,8 +346,9 @@ def _gather_hrefs_from_frame(fr):
     expr = "els => els.map(e => e.getAttribute('href')).filter(h => h && h.trim())"
     try:
         collected.extend(fr.eval_on_selector_all("a:has(img[src*='calendar.jpg'])", expr))
-    except Exception:
-        pass
+    except Exception as e:
+        fr_url = getattr(fr, "url", "N/A")
+        print(f"  [_gather_hrefs] {fr.name!r} ({fr_url[:60]}) エラー: {e}", flush=True)
     return collected
 
 
