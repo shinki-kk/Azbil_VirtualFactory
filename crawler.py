@@ -320,6 +320,10 @@ def scrape_calendar(page, calendar_root):
                     timeout=_PW_DETAIL_NAV_MS,
                 )
                 time.sleep(0.15)
+                # 最初の1件だけスクリーンショットを保存（ページ構造の確認用）
+                if i == 1:
+                    detail_page.screenshot(path="screenshot_detail.png")
+                    print("  （screenshot_detail.png を保存しました）", flush=True)
                 job = extract_job_detail(detail_page, now)
                 if job:
                     jobs.append(job)
