@@ -38,9 +38,11 @@ MAIL_TO       = "sinki@shinki-kk.co.jp"
 SMTP_SERVER   = "smtp.lolipop.jp"
 SMTP_PORT     = 465
 
-SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]          # スプレッドシートのID
-SHEET_MAIN     = "最新データ"                            # メインシート名
-SHEET_BACKUP   = "前回データ"                            # バックアップシート名
+SPREADSHEET_ID  = os.environ["SPREADSHEET_ID"]          # スプレッドシートのID
+SHEET_MAIN      = "最新データ"                           # メインシート名
+SHEET_BACKUP    = "前回データ"                           # バックアップシート名
+SHEET_CHANGES   = "変更履歴"                             # 変更履歴シート名
+SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{os.environ['SPREADSHEET_ID']}"
 
 # 取得する項目の列ヘッダー
 HEADERS = ["積上日", "工事番号", "外形図番", "盤種類", "本数", "出図日", "組配協力会社名"]
@@ -91,7 +93,7 @@ def read_sheet(client, sheet_name):
         return []
 
 
-def write_sheet(client, sheet_name, rows, run_datetime=""):
+def write_sheet(client, sheet_name, rows, run_datetime="", changes=None):
     """指定シートを上書きする。1行目に取得日時、2行目にヘッダー、3行目以降にデータ"""
     sh = client.open_by_key(SPREADSHEET_ID)
     try:
@@ -103,6 +105,8 @@ def write_sheet(client, sheet_name, rows, run_datetime=""):
     meta_row = [f"取得日時：{run_datetime}"] if run_datetime else [""]
     ws.update([meta_row, HEADERS] + rows)
     format_sheet(ws, rows)
+    if changes:
+        _colorize_changes_in_sheet(ws, rows, changes)
 
 
 def format_sheet(ws, rows):
@@ -157,6 +161,120 @@ def format_sheet(ws, rows):
                 }
             })
         prev_date = current_date
+
+    if requests:
+        ws.spreadsheet.batch_update({"requests": requests})
+
+
+def _colorize_changes_in_sheet(ws, rows, changes):
+    """最新データシートの追加・変更行に色を付ける"""
+    added_keys   = {c["工事番号"] for c in changes if c["種別"] == "追加"}
+    changed_keys = {c["工事番号"] for c in changes if c["種別"] == "変更"}
+
+    color_added   = {"red": 0.85, "green": 0.93, "blue": 0.83}  # 薄緑：追加
+    color_changed = {"red": 1.00, "green": 0.95, "blue": 0.80}  # 薄黄：変更
+
+    requests = []
+    for i, row in enumerate(rows):
+        if len(row) <= 1:
+            continue
+        key = row[1]
+        if key in added_keys:
+            color = color_added
+        elif key in changed_keys:
+            color = color_changed
+        else:
+            continue
+        sheet_row = i + 2   # 0-based: meta=0, header=1, data starts at 2
+        requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": sheet_row,
+                    "endRowIndex": sheet_row + 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": len(HEADERS),
+                },
+                "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                "fields": "userEnteredFormat(backgroundColor)",
+            }
+        })
+
+    if requests:
+        ws.spreadsheet.batch_update({"requests": requests})
+
+
+def write_changes_sheet(client, changes, run_datetime=""):
+    """変更履歴シートに今回の変更内容を書き出す"""
+    sh = client.open_by_key(SPREADSHEET_ID)
+    try:
+        ws = sh.worksheet(SHEET_CHANGES)
+        ws.clear()
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=SHEET_CHANGES, rows=500, cols=10)
+
+    meta_row       = [f"確認日時：{run_datetime}"] if run_datetime else [""]
+    change_headers = ["種別", "工事番号", "変更項目", "変更前", "変更後"]
+
+    if not changes:
+        ws.update([meta_row, ["変更はありませんでした"]])
+        return
+
+    change_rows = []
+    for c in changes:
+        key = c["工事番号"]
+        if c["種別"] == "追加":
+            for i, h in enumerate(HEADERS):
+                change_rows.append(["追加", key, h, "-", c["内容"][i] if i < len(c["内容"]) else ""])
+        elif c["種別"] == "削除":
+            for i, h in enumerate(HEADERS):
+                change_rows.append(["削除", key, h, c["内容"][i] if i < len(c["内容"]) else "", "-"])
+        elif c["種別"] == "変更":
+            for diff in c["差分"]:
+                parts   = diff.split("：", 1)
+                field   = parts[0]
+                vals    = parts[1].split(" → ") if len(parts) > 1 else ["", ""]
+                old_val = vals[0] if vals else ""
+                new_val = vals[1] if len(vals) > 1 else ""
+                change_rows.append(["変更", key, field, old_val, new_val])
+
+    ws.update([meta_row, change_headers] + change_rows)
+
+    # 書式設定
+    requests = []
+
+    # ヘッダー行（2行目）
+    requests.append({
+        "repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 1, "endRowIndex": 2,
+                      "startColumnIndex": 0, "endColumnIndex": 5},
+            "cell": {"userEnteredFormat": {
+                "backgroundColor": {"red": 0.27, "green": 0.51, "blue": 0.71},
+                "textFormat": {"bold": True, "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}},
+                "horizontalAlignment": "CENTER",
+            }},
+            "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+        }
+    })
+
+    # データ行の色付け
+    color_map = {
+        "追加": {"red": 0.85, "green": 0.93, "blue": 0.83},  # 薄緑
+        "削除": {"red": 0.96, "green": 0.80, "blue": 0.80},  # 薄赤
+        "変更": {"red": 1.00, "green": 0.95, "blue": 0.80},  # 薄黄
+    }
+    for i, row in enumerate(change_rows):
+        color = color_map.get(row[0])
+        if color:
+            sheet_row = i + 2   # 0-based: meta=0, header=1, data starts at 2
+            requests.append({
+                "repeatCell": {
+                    "range": {"sheetId": ws.id, "startRowIndex": sheet_row, "endRowIndex": sheet_row + 1,
+                              "startColumnIndex": 0, "endColumnIndex": 5},
+                    "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                    "fields": "userEnteredFormat(backgroundColor)",
+                }
+            })
 
     if requests:
         ws.spreadsheet.batch_update({"requests": requests})
@@ -657,13 +775,17 @@ def send_email(changes, new_rows):
                 if i < len(c["内容"]):
                     lines.append(f"  {h}：{c['内容'][i]}")
         elif c["種別"] == "削除":
-            lines.append("  （このジョブはカレンダーから削除されました）")
+            lines.append("  （カレンダーから削除されました）")
+            for i, h in enumerate(HEADERS):
+                if i < len(c["内容"]):
+                    lines.append(f"  {h}：{c['内容'][i]}")
         elif c["種別"] == "変更":
             for diff in c["差分"]:
                 lines.append(f"  {diff}")
         lines.append("")
 
     lines.append(f"\n今回のクロールで取得したジョブ数：{len(new_rows)}件")
+    lines.append(f"\nスプレッドシートで確認（変更履歴シートに詳細あり）：\n{SPREADSHEET_URL}")
 
     body = "\n".join(lines)
 
@@ -684,7 +806,11 @@ def send_no_change_email(new_rows):
     """変更なしの場合も確認メールを送る"""
     now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M")
     subject = f"【生産計画表】変更なし {now}"
-    body = f"生産計画表に変更はありませんでした。（確認日時：{now}）\n取得ジョブ数：{len(new_rows)}件"
+    body = (
+        f"生産計画表に変更はありませんでした。（確認日時：{now}）\n"
+        f"取得ジョブ数：{len(new_rows)}件\n\n"
+        f"スプレッドシートで確認：\n{SPREADSHEET_URL}"
+    )
 
     msg = MIMEMultipart()
     msg["From"]    = MAIL_USER
@@ -725,8 +851,10 @@ def main():
     print("[ステップ5] スプレッドシートに書き込んでいます…")
     write_sheet(client, SHEET_BACKUP, old_rows, run_datetime)
     print("[ステップ5a] バックアップシート「前回データ」更新OK")
-    write_sheet(client, SHEET_MAIN, new_rows, run_datetime)
-    print("[ステップ5b] メインシート「最新データ」更新OK")
+    write_sheet(client, SHEET_MAIN, new_rows, run_datetime, changes=changes)
+    print("[ステップ5b] メインシート「最新データ」更新OK（変更行に色付け済み）")
+    write_changes_sheet(client, changes, run_datetime)
+    print("[ステップ5c] 変更履歴シート更新OK")
     print("スプレッドシート更新完了")
 
     print("[ステップ6] メールを送っています…")
