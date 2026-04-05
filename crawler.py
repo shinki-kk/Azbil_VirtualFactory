@@ -47,6 +47,9 @@ SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{os.environ['SPREADSH
 # 取得する項目の列ヘッダー
 HEADERS = ["積上日", "工事番号", "外形図番", "盤種類", "本数", "出図日", "組配協力会社名"]
 
+# 外形図番サフィックス（E・G・H・I・N・O・P は聞き間違い防止のため除外）
+SUFFIX_CHARS = list("ABCDFJKLMQRS")
+
 # Playwright: ログイン・カレンダー操作
 _PW_TIMEOUT_MS = 60_000
 # 工程詳細は DOM が出ればよい（load や毎回 new_page だと GitHub 上で極端に遅くなる）
@@ -315,10 +318,71 @@ def _resolve_calendar_root(page):
     return page
 
 
+def _rows_per_unit(banshu):
+    """盤種類から1台あたりのカレンダー行数を返す（自立型=2行、壁掛型=1行）"""
+    if "自" in banshu:
+        return 2
+    return 1  # 壁掛型、またはその他
+
+
+def expand_jobs(jobs_with_rowspan):
+    """
+    (job_row, rowspan) のリストを受け取り、本数ごとに行を展開して返す。
+
+    - rowspan ÷ rows_per_unit(盤種類) = この日の台数
+    - 同じ (工事番号, 外形図番) が複数日にまたがる場合、積上日順にサフィックスを連続付与
+    - 台数が合計1台の場合はサフィックスなし
+    - 展開後の各行は「本数=1」（1行1台）
+
+    サフィックス順: A B C D F J K L M Q R S
+    """
+    from collections import defaultdict
+
+    # (工事番号, 外形図番) でグループ化（出現順を保持）
+    groups = defaultdict(list)
+    key_order = []
+    seen_keys = set()
+    for job, rowspan in jobs_with_rowspan:
+        key = (job[1], job[2])  # (工事番号, 外形図番)
+        if key not in seen_keys:
+            key_order.append(key)
+            seen_keys.add(key)
+        groups[key].append((job, rowspan))
+
+    result = []
+    for key in key_order:
+        entries = groups[key]
+        # 積上日（job[0]）でソート
+        entries.sort(key=lambda x: x[0][0])
+
+        banshu = entries[0][0][3]  # 盤種類（全エントリ共通のはず）
+        rpu = _rows_per_unit(banshu)
+
+        # 各エントリの1日分の台数を算出
+        per_day = [(job, max(1, rowspan // rpu)) for job, rowspan in entries]
+        total_units = sum(u for _, u in per_day)
+
+        if total_units <= 1:
+            # サフィックス不要：そのまま出力
+            result.append(entries[0][0][:])
+            continue
+
+        # サフィックスを付与して1行1台に展開
+        suffix_idx = 0
+        for job, units in per_day:
+            for _ in range(units):
+                new_job = job[:]
+                if suffix_idx < len(SUFFIX_CHARS):
+                    new_job[2] = job[2] + SUFFIX_CHARS[suffix_idx]
+                suffix_idx += 1
+                new_job[4] = "1"  # 本数は1（1行1台）
+                result.append(new_job)
+
+    return result
+
+
 def crawl():
     """サイトにログインして生産計画表を4週分クロールし、ジョブ一覧を返す"""
-    jobs = []
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         # browser.new_page() だけのとき、環境によっては context.new_page() が使えない
@@ -370,13 +434,13 @@ def crawl():
 
         # ── フェーズ1：1〜2週目と3〜4週目のhrefをすべて先に収集する ──
         # （詳細ページを開くとASPセッションが壊れるため、ボタン操作を先に済ませる）
-        all_detail_urls = []
+        all_detail_items = []  # (url, rowspan) のリスト
 
         # 1〜2週目のhref収集
         calendar_root = _resolve_calendar_root(page)
-        week12_urls = _collect_detail_hrefs(calendar_root, page)
-        print(f"[クロール] 1〜2週目 詳細リンク数：{len(week12_urls)}件", flush=True)
-        all_detail_urls.extend(week12_urls)
+        week12_items = _collect_detail_hrefs(calendar_root, page)
+        print(f"[クロール] 1〜2週目 詳細リンク数：{len(week12_items)}件", flush=True)
+        all_detail_items.extend(week12_items)
 
         # ── 「次の2週」ボタンで3〜4週目へ移動（詳細ページをまだ開いていないのでセッションは健全）──
         button_frame = None
@@ -413,18 +477,19 @@ def crawl():
 
             # BODYフレームの読み込みを待つ
             time.sleep(3)
-            first_half_set = set(week12_urls)
+            week12_url_set = {url for url, _ in week12_items}
             new_body = None
             for attempt in range(15):
                 candidate = _resolve_calendar_root(page)
                 if candidate is not page and _is_frame_alive(candidate):
                     try:
                         candidate.wait_for_load_state("load", timeout=_PW_TIMEOUT_MS)
-                        new_hrefs = _collect_detail_hrefs(candidate, page)
-                        if new_hrefs and set(new_hrefs) != first_half_set:
+                        new_items = _collect_detail_hrefs(candidate, page)
+                        new_url_set = {url for url, _ in new_items}
+                        if new_items and new_url_set != week12_url_set:
                             new_body = candidate
-                            print(f"[クロール] 3〜4週目の新データ確認OK（{len(new_hrefs)}件、試行{attempt+1}回目）", flush=True)
-                            all_detail_urls.extend(new_hrefs)
+                            print(f"[クロール] 3〜4週目の新データ確認OK（{len(new_items)}件、試行{attempt+1}回目）", flush=True)
+                            all_detail_items.extend(new_items)
                             break
                         else:
                             print(f"[クロール] DOMまだ更新されていない（href同一、試行{attempt+1}回目）", flush=True)
@@ -447,30 +512,31 @@ def crawl():
         # ── フェーズ2：収集したURLをもとに詳細ページを取得 ──
         # URL重複を除去（順序維持）
         seen = set()
-        unique_urls = []
-        for u in all_detail_urls:
+        unique_items = []
+        for (u, rs) in all_detail_items:
             if u not in seen:
                 seen.add(u)
-                unique_urls.append(u)
-        all_detail_urls = unique_urls
+                unique_items.append((u, rs))
+        all_detail_items = unique_items
 
-        print(f"[クロール] 全詳細リンク数（重複除去後）：{len(all_detail_urls)}件", flush=True)
+        print(f"[クロール] 全詳細リンク数（重複除去後）：{len(all_detail_items)}件", flush=True)
 
         # テストモード
         if os.environ.get("TEST_MODE") == "true":
-            all_detail_urls = all_detail_urls[:6]  # 各週3件ずつ程度
-            print(f"  ※テストモード：{len(all_detail_urls)}件に絞って取得します", flush=True)
+            all_detail_items = all_detail_items[:6]  # 各週3件ずつ程度
+            print(f"  ※テストモード：{len(all_detail_items)}件に絞って取得します", flush=True)
 
         # 画像ブロックを有効にして転送量を削減
         context.route("**/*", _route_skip_images_fonts)
 
-        if all_detail_urls:
+        raw_jobs = []  # (job_row, rowspan) の一時リスト
+        if all_detail_items:
             detail_page = page.context.new_page()
             detail_page.set_default_navigation_timeout(_PW_DETAIL_NAV_MS)
             detail_page.set_default_timeout(5_000)
             try:
-                for i, detail_url in enumerate(all_detail_urls, start=1):
-                    print(f"  詳細取得 {i}/{len(all_detail_urls)} …", flush=True)
+                for i, (detail_url, rowspan) in enumerate(all_detail_items, start=1):
+                    print(f"  詳細取得 {i}/{len(all_detail_items)} …", flush=True)
                     try:
                         detail_page.goto(
                             detail_url,
@@ -480,7 +546,7 @@ def crawl():
                         time.sleep(0.5)
                         job = extract_job_detail(detail_page)
                         if job:
-                            jobs.append(job)
+                            raw_jobs.append((job, rowspan))
                     except Exception as e:
                         print(f"  （スキップ {i}）{e}", flush=True)
             finally:
@@ -488,7 +554,7 @@ def crawl():
 
         browser.close()
 
-    return jobs
+    return expand_jobs(raw_jobs)
 
 
 # 相対リンク解決のフォールバック（フレームURLが取れないとき）
@@ -557,18 +623,24 @@ def _looks_like_job_detail_href(href):
 
 
 def _gather_hrefs_from_frame(fr):
-    """フレーム内のカレンダーアイコン（calendar.jpg）を含むリンクのhrefを列挙"""
+    """フレーム内のカレンダーアイコン（calendar.jpg）を含むリンクの href と rowspan を列挙"""
     # detached なフレームはスキップ
     if not _is_frame_alive(fr):
         return []
     collected = []
-    expr = "els => els.map(e => e.getAttribute('href')).filter(h => h && h.trim())"
+    # rowspan = 親 <td> の rowSpan。1台あたりの行数（自立型=2/壁掛型=1）× 本数 になる
+    expr = (
+        "els => els.map(e => {"
+        "  const td = e.closest('td');"
+        "  return { href: e.getAttribute('href'), rowspan: td ? td.rowSpan : 1 };"
+        "}).filter(o => o.href && o.href.trim())"
+    )
     try:
         collected.extend(fr.eval_on_selector_all("a:has(img[src*='calendar.jpg'])", expr))
     except Exception as e:
         fr_url = getattr(fr, "url", "N/A")
         print(f"  [_gather_hrefs] {fr.name!r} ({fr_url[:60]}) エラー: {e}", flush=True)
-    return collected
+    return collected  # [{"href": str, "rowspan": int}]
 
 
 def _iter_calendar_frames(calendar_root, page):
@@ -589,8 +661,8 @@ def _iter_calendar_frames(calendar_root, page):
 
 def _collect_detail_hrefs(calendar_root, page):
     """
-    詳細URLを重複なく収集（絶対URLのリストを返す）。
-    カレンダーアイコンは CmnLinkNonClear.asp?RtnURL=... のため、フレームURL基準で相対パスを解決する。
+    詳細URL と rowspan を重複なく収集（(url, rowspan) のリストを返す）。
+    rowspan = 親 <td> の rowSpan 値（盤種類の行数/台 × 本数 に相当）。
     """
     ordered = []
     seen = set()
@@ -601,16 +673,18 @@ def _collect_detail_hrefs(calendar_root, page):
             part = _gather_hrefs_from_frame(fr)
         except Exception:
             return
-        all_raw.extend(part)
         base_url = _frame_resolve_base(fr)
-        for h in part:
+        for item in part:
+            h       = item["href"]
+            rowspan = item.get("rowspan", 1)
+            all_raw.append(h)
             if not _looks_like_job_detail_href(h):
                 continue
             full = _resolve_cmnlinknonclear(_detail_page_url(h, base_url))
             if not full or full in seen:
                 continue
             seen.add(full)
-            ordered.append(full)
+            ordered.append((full, rowspan))
 
     for fr in _iter_calendar_frames(calendar_root, page):
         process_frame(fr)
@@ -630,7 +704,7 @@ def _collect_detail_hrefs(calendar_root, page):
         if sample:
             print(f"詳細候補0件。画面内のリンク例（最大15）: {sample}")
 
-    return ordered
+    return ordered  # [(url, rowspan)]
 
 
 def scrape_calendar(page, calendar_root):
