@@ -2,9 +2,10 @@ name: 生産計画表クロール
 
 on:
   schedule:
-    # 日本時間 8:00（UTC 23:00）と 17:00（UTC 8:00）に実行
-    - cron: '0 23 * * *'
-    - cron: '0 8 * * *'
+    # 日本時間 7:50（UTC 22:50）、12:50（UTC 3:50）、16:00（UTC 7:00）に実行
+    - cron: '50 22 * * *'
+    - cron: '50 3 * * *'
+    - cron: '0 7 * * *'
   workflow_dispatch:  # 手動実行も可能にする
     inputs:
       test_mode:
