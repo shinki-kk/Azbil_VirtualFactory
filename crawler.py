@@ -92,7 +92,7 @@ def read_sheet(client, sheet_name):
     try:
         ws = sh.worksheet(sheet_name)
         rows = ws.get_all_values()
-        return rows[2:] if len(rows) > 2 else []  # 1行目:取得日時、2行目:ヘッダー
+        return rows[3:] if len(rows) > 3 else []  # 1行目:取得日時、2行目:凡例、3行目:ヘッダー
     except gspread.WorksheetNotFound:
         return []
 
@@ -238,8 +238,9 @@ def write_sheet(client, sheet_name, rows, run_datetime="", changes=None):
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=sheet_name, rows=500, cols=20)
 
-    meta_row = [f"取得日時：{run_datetime}"] if run_datetime else [""]
-    ws.update([meta_row, HEADERS] + rows)
+    meta_row   = [f"取得日時：{run_datetime}"] if run_datetime else [""]
+    legend_row = ["凡例：", "追加", "変更"] + [""] * (len(HEADERS) - 3)
+    ws.update([meta_row, legend_row, HEADERS] + rows)
     format_sheet(ws, rows)
     if changes:
         _colorize_changes_in_sheet(ws, rows, changes)
@@ -255,7 +256,7 @@ def format_sheet(ws, rows):
         "updateBorders": {
             "range": {
                 "sheetId": ws.id,
-                "startRowIndex": 2,   # データ行開始（0-based）
+                "startRowIndex": 3,   # データ行開始（0-based）
                 "endRowIndex": 500,
                 "startColumnIndex": 0,
                 "endColumnIndex": num_cols,
@@ -264,13 +265,27 @@ def format_sheet(ws, rows):
         }
     })
 
-    # ── ヘッダー行（2行目）：背景色・白太字・中央揃え ──
+    # ── 凡例行（2行目）：追加＝薄緑、変更＝薄黄 ──
+    for col_idx, color in [
+        (1, {"red": 0.85, "green": 0.93, "blue": 0.83}),  # 追加：薄緑
+        (2, {"red": 1.00, "green": 0.95, "blue": 0.80}),  # 変更：薄黄
+    ]:
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": ws.id, "startRowIndex": 1, "endRowIndex": 2,
+                          "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1},
+                "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                "fields": "userEnteredFormat(backgroundColor)",
+            }
+        })
+
+    # ── ヘッダー行（3行目）：背景色・白太字・中央揃え ──
     requests.append({
         "repeatCell": {
             "range": {
                 "sheetId": ws.id,
-                "startRowIndex": 1,   # 0-based で2行目
-                "endRowIndex": 2,
+                "startRowIndex": 2,   # 0-based で3行目
+                "endRowIndex": 3,
                 "startColumnIndex": 0,
                 "endColumnIndex": num_cols,
             },
@@ -294,7 +309,7 @@ def format_sheet(ws, rows):
     for i, row in enumerate(rows):
         current_date = row[0] if row else ""
         if prev_date is not None and current_date != prev_date:
-            sheet_row_index = i + 2   # 0-based: 1行目=meta, 2行目=header, 3行目〜=data
+            sheet_row_index = i + 3   # 0-based: meta=0, 凡例=1, header=2, data=3〜
             requests.append({
                 "updateBorders": {
                     "range": {
@@ -336,7 +351,7 @@ def _colorize_changes_in_sheet(ws, rows, changes):
             color = color_changed
         else:
             continue
-        sheet_row = i + 2   # 0-based: meta=0, header=1, data starts at 2
+        sheet_row = i + 3   # 0-based: meta=0, 凡例=1, header=2, data=3〜
         requests.append({
             "repeatCell": {
                 "range": {
@@ -370,8 +385,21 @@ def write_changes_sheet(client, changes, run_datetime=""):
 
     changes_sheet_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={ws.id}"
 
+    legend_row = ["凡例：", "追加", "変更", "削除", "", ""]
+
     if not changes:
-        ws.update([meta_row, ["変更はありませんでした"]])
+        ws.update([meta_row, legend_row, ["変更はありませんでした"]])
+        ws.spreadsheet.batch_update({"requests": [
+            {"repeatCell": {"range": {"sheetId": ws.id, "startRowIndex": 1, "endRowIndex": 2,
+                             "startColumnIndex": col, "endColumnIndex": col + 1},
+                            "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                            "fields": "userEnteredFormat(backgroundColor)"}}
+            for col, color in [
+                (1, {"red": 0.85, "green": 0.93, "blue": 0.83}),
+                (2, {"red": 1.00, "green": 0.95, "blue": 0.80}),
+                (3, {"red": 0.96, "green": 0.80, "blue": 0.80}),
+            ]
+        ]})
         return changes_sheet_url
 
     change_rows = []
@@ -393,15 +421,30 @@ def write_changes_sheet(client, changes, run_datetime=""):
                 new_val = vals[1] if len(vals) > 1 else ""
                 change_rows.append(["変更", koujiban, gaiken, field, old_val, new_val])
 
-    ws.update([meta_row, change_headers] + change_rows)
+    ws.update([meta_row, legend_row, change_headers] + change_rows)
 
     # 書式設定
     requests = []
 
-    # ヘッダー行（2行目）
+    # 凡例行（2行目）の色付け：追加=薄緑、変更=薄黄、削除=薄赤
+    for col_idx, color in [
+        (1, {"red": 0.85, "green": 0.93, "blue": 0.83}),  # 追加
+        (2, {"red": 1.00, "green": 0.95, "blue": 0.80}),  # 変更
+        (3, {"red": 0.96, "green": 0.80, "blue": 0.80}),  # 削除
+    ]:
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": ws.id, "startRowIndex": 1, "endRowIndex": 2,
+                          "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1},
+                "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                "fields": "userEnteredFormat(backgroundColor)",
+            }
+        })
+
+    # ヘッダー行（3行目）
     requests.append({
         "repeatCell": {
-            "range": {"sheetId": ws.id, "startRowIndex": 1, "endRowIndex": 2,
+            "range": {"sheetId": ws.id, "startRowIndex": 2, "endRowIndex": 3,
                       "startColumnIndex": 0, "endColumnIndex": 6},
             "cell": {"userEnteredFormat": {
                 "backgroundColor": {"red": 0.27, "green": 0.51, "blue": 0.71},
@@ -421,7 +464,7 @@ def write_changes_sheet(client, changes, run_datetime=""):
     for i, row in enumerate(change_rows):
         color = color_map.get(row[0])
         if color:
-            sheet_row = i + 2   # 0-based: meta=0, header=1, data starts at 2
+            sheet_row = i + 3   # 0-based: meta=0, 凡例=1, header=2, data=3〜
             requests.append({
                 "repeatCell": {
                     "range": {"sheetId": ws.id, "startRowIndex": sheet_row, "endRowIndex": sheet_row + 1,
