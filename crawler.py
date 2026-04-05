@@ -15,7 +15,7 @@ import smtplib
 import sys
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urljoin, urlparse, parse_qs, unquote
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -644,7 +644,7 @@ def detect_changes(old_rows, new_rows):
 # ──────────────────────────────────────────
 def send_email(changes, new_rows):
     """変更内容をメールで送信する"""
-    now = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+    now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M")
     subject = f"【生産計画表】変更通知 {now}"
 
     # メール本文を作成
@@ -682,7 +682,7 @@ def send_email(changes, new_rows):
 
 def send_no_change_email(new_rows):
     """変更なしの場合も確認メールを送る"""
-    now = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+    now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M")
     subject = f"【生産計画表】変更なし {now}"
     body = f"生産計画表に変更はありませんでした。（確認日時：{now}）\n取得ジョブ数：{len(new_rows)}件"
 
@@ -721,7 +721,7 @@ def main():
     changes = detect_changes(old_rows, new_rows)
     print(f"[ステップ4] OK（変更件数：{len(changes)}件）")
 
-    run_datetime = datetime.now().strftime("%Y年%m月%d日 %H:%M")
+    run_datetime = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M")
     print("[ステップ5] スプレッドシートに書き込んでいます…")
     write_sheet(client, SHEET_BACKUP, old_rows, run_datetime)
     print("[ステップ5a] バックアップシート「前回データ」更新OK")
