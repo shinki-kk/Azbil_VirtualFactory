@@ -379,10 +379,11 @@ def write_changes_sheet(client, changes, run_datetime=""):
         koujiban = c["工事番号"]
         gaiken   = c.get("外形図番", "")
         if c["種別"] == "追加":
-            for i, h in enumerate(HEADERS):
-                change_rows.append(["追加", koujiban, gaiken, h, "-", c["内容"][i] if i < len(c["内容"]) else ""])
+            sekiagebi = c["内容"][0] if c["内容"] else ""
+            change_rows.append(["追加", koujiban, gaiken, "積上日", "-", sekiagebi])
         elif c["種別"] == "削除":
-            change_rows.append(["削除", koujiban, gaiken, "（カレンダーから削除）", "", ""])
+            sekiagebi = c["内容"][0] if c["内容"] else ""
+            change_rows.append(["削除", koujiban, gaiken, "積上日", sekiagebi, "-"])
         elif c["種別"] == "変更":
             for diff in c["差分"]:
                 parts   = diff.split("：", 1)
@@ -941,7 +942,7 @@ def detect_changes(old_rows, new_rows, settings=None):
             new = new_dict[key]
             diff_items = []
             for i, header in enumerate(HEADERS):
-                if header in ("積上日", "工事番号", "外形図番"):
+                if header in ("工事番号", "外形図番"):
                     continue
                 if not _should_notify(header):
                     continue
@@ -970,14 +971,9 @@ def send_email(changes, new_rows, changes_sheet_url="", mail_to_list=None):
         gaiken = c.get("外形図番", "")
         lines.append(f"■ {c['種別']}　工事番号：{c['工事番号']}　外形図番：{gaiken}")
         if c["種別"] == "追加":
-            for i, h in enumerate(HEADERS):
-                if i < len(c["内容"]):
-                    lines.append(f"  {h}：{c['内容'][i]}")
+            lines.append(f"  積上日：{c['内容'][0] if c['内容'] else ''}")
         elif c["種別"] == "削除":
-            lines.append("  （カレンダーから削除されました）")
-            for i, h in enumerate(HEADERS):
-                if i < len(c["内容"]):
-                    lines.append(f"  {h}：{c['内容'][i]}")
+            lines.append(f"  積上日：{c['内容'][0] if c['内容'] else ''}")
         elif c["種別"] == "変更":
             for diff in c["差分"]:
                 lines.append(f"  {diff}")
