@@ -838,46 +838,6 @@ def _collect_detail_hrefs(calendar_root, page):
     return ordered  # [(url, rowspan)]
 
 
-def scrape_calendar(page, calendar_root):
-    """現在表示されているカレンダーの全ジョブ詳細を取得する"""
-    jobs = []
-
-    detail_urls = _collect_detail_hrefs(calendar_root, page)
-    print(f"詳細リンク数：{len(detail_urls)}件（この2週分の画面）", flush=True)
-
-    # テストモード：最初の3件だけ取得して動作確認を素早く行う
-    if os.environ.get("TEST_MODE") == "true":
-        detail_urls = detail_urls[:3]
-        print(f"  ※テストモード：{len(detail_urls)}件に絞って取得します", flush=True)
-
-    if not detail_urls:
-        return jobs
-
-    # タブを毎回 new/close しない（Chrome で人が連続クリックするのに近く、CI でも速い）
-    detail_page = page.context.new_page()
-    detail_page.set_default_navigation_timeout(_PW_DETAIL_NAV_MS)
-    detail_page.set_default_timeout(5_000)   # 要素が見つからない場合は5秒で諦める
-    try:
-        for i, detail_url in enumerate(detail_urls, start=1):
-            print(f"  詳細取得 {i}/{len(detail_urls)} …", flush=True)
-            try:
-                detail_page.goto(
-                    detail_url,
-                    wait_until="load",
-                    timeout=_PW_DETAIL_NAV_MS,
-                )
-                time.sleep(0.5)
-                job = extract_job_detail(detail_page)
-                if job:
-                    jobs.append(job)
-            except Exception as e:
-                print(f"  （スキップ {i}）{e}", flush=True)
-    finally:
-        detail_page.close()
-
-    return jobs
-
-
 def extract_job_detail(page):
     """工程詳細画面から必要項目を取得する"""
     def get_input(name):
