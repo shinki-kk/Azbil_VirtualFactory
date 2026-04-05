@@ -382,8 +382,7 @@ def write_changes_sheet(client, changes, run_datetime=""):
             for i, h in enumerate(HEADERS):
                 change_rows.append(["追加", koujiban, gaiken, h, "-", c["内容"][i] if i < len(c["内容"]) else ""])
         elif c["種別"] == "削除":
-            for i, h in enumerate(HEADERS):
-                change_rows.append(["削除", koujiban, gaiken, h, c["内容"][i] if i < len(c["内容"]) else "", "-"])
+            change_rows.append(["削除", koujiban, gaiken, "（カレンダーから削除）", "", ""])
         elif c["種別"] == "変更":
             for diff in c["差分"]:
                 parts   = diff.split("：", 1)
