@@ -59,8 +59,9 @@ jobs:
           python -u crawler.py
 
       - name: スクリーンショットを保存
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
           path: screenshot_*.png
+          retention-days: 7
