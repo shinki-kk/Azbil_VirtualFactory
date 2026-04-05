@@ -232,6 +232,20 @@ def format_sheet(ws, rows):
     num_cols = len(HEADERS)
     requests = []
 
+    # ── データ行の上罫線を全クリア（前回より行数が減ったとき古い罫線が残らないよう）──
+    requests.append({
+        "updateBorders": {
+            "range": {
+                "sheetId": ws.id,
+                "startRowIndex": 2,   # データ行開始（0-based）
+                "endRowIndex": 500,
+                "startColumnIndex": 0,
+                "endColumnIndex": num_cols,
+            },
+            "top": {"style": "NONE"},
+        }
+    })
+
     # ── ヘッダー行（2行目）：背景色・白太字・中央揃え ──
     requests.append({
         "repeatCell": {
@@ -286,17 +300,18 @@ def format_sheet(ws, rows):
 
 def _colorize_changes_in_sheet(ws, rows, changes):
     """最新データシートの追加・変更行に色を付ける"""
-    added_keys   = {c["工事番号"] for c in changes if c["種別"] == "追加"}
-    changed_keys = {c["工事番号"] for c in changes if c["種別"] == "変更"}
+    # キーは（工事番号, 外形図番）のペア
+    added_keys   = {(c["工事番号"], c.get("外形図番", "")) for c in changes if c["種別"] == "追加"}
+    changed_keys = {(c["工事番号"], c.get("外形図番", "")) for c in changes if c["種別"] == "変更"}
 
     color_added   = {"red": 0.85, "green": 0.93, "blue": 0.83}  # 薄緑：追加
     color_changed = {"red": 1.00, "green": 0.95, "blue": 0.80}  # 薄黄：変更
 
     requests = []
     for i, row in enumerate(rows):
-        if len(row) <= 1:
+        if len(row) <= 2:
             continue
-        key = row[1]
+        key = (row[1], row[2])  # (工事番号, 外形図番)
         if key in added_keys:
             color = color_added
         elif key in changed_keys:
@@ -332,7 +347,7 @@ def write_changes_sheet(client, changes, run_datetime=""):
         ws = sh.add_worksheet(title=SHEET_CHANGES, rows=500, cols=10)
 
     meta_row       = [f"確認日時：{run_datetime}"] if run_datetime else [""]
-    change_headers = ["種別", "工事番号", "変更項目", "変更前", "変更後"]
+    change_headers = ["種別", "工事番号", "外形図番", "変更項目", "変更前", "変更後"]
 
     changes_sheet_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={ws.id}"
 
@@ -342,13 +357,14 @@ def write_changes_sheet(client, changes, run_datetime=""):
 
     change_rows = []
     for c in changes:
-        key = c["工事番号"]
+        koujiban = c["工事番号"]
+        gaiken   = c.get("外形図番", "")
         if c["種別"] == "追加":
             for i, h in enumerate(HEADERS):
-                change_rows.append(["追加", key, h, "-", c["内容"][i] if i < len(c["内容"]) else ""])
+                change_rows.append(["追加", koujiban, gaiken, h, "-", c["内容"][i] if i < len(c["内容"]) else ""])
         elif c["種別"] == "削除":
             for i, h in enumerate(HEADERS):
-                change_rows.append(["削除", key, h, c["内容"][i] if i < len(c["内容"]) else "", "-"])
+                change_rows.append(["削除", koujiban, gaiken, h, c["内容"][i] if i < len(c["内容"]) else "", "-"])
         elif c["種別"] == "変更":
             for diff in c["差分"]:
                 parts   = diff.split("：", 1)
@@ -356,7 +372,7 @@ def write_changes_sheet(client, changes, run_datetime=""):
                 vals    = parts[1].split(" → ") if len(parts) > 1 else ["", ""]
                 old_val = vals[0] if vals else ""
                 new_val = vals[1] if len(vals) > 1 else ""
-                change_rows.append(["変更", key, field, old_val, new_val])
+                change_rows.append(["変更", koujiban, gaiken, field, old_val, new_val])
 
     ws.update([meta_row, change_headers] + change_rows)
 
@@ -367,7 +383,7 @@ def write_changes_sheet(client, changes, run_datetime=""):
     requests.append({
         "repeatCell": {
             "range": {"sheetId": ws.id, "startRowIndex": 1, "endRowIndex": 2,
-                      "startColumnIndex": 0, "endColumnIndex": 5},
+                      "startColumnIndex": 0, "endColumnIndex": 6},
             "cell": {"userEnteredFormat": {
                 "backgroundColor": {"red": 0.27, "green": 0.51, "blue": 0.71},
                 "textFormat": {"bold": True, "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}},
@@ -390,7 +406,7 @@ def write_changes_sheet(client, changes, run_datetime=""):
             requests.append({
                 "repeatCell": {
                     "range": {"sheetId": ws.id, "startRowIndex": sheet_row, "endRowIndex": sheet_row + 1,
-                              "startColumnIndex": 0, "endColumnIndex": 5},
+                              "startColumnIndex": 0, "endColumnIndex": 6},
                     "cell": {"userEnteredFormat": {"backgroundColor": color}},
                     "fields": "userEnteredFormat(backgroundColor)",
                 }
@@ -926,18 +942,19 @@ def detect_changes(old_rows, new_rows, settings=None):
 
     changes = []
 
-    old_dict = {row[1]: row for row in old_rows if len(row) > 1}
-    new_dict = {row[1]: row for row in new_rows if len(row) > 1}
+    # キーは（工事番号, 外形図番）のペア
+    old_dict = {(row[1], row[2]): row for row in old_rows if len(row) > 2}
+    new_dict = {(row[1], row[2]): row for row in new_rows if len(row) > 2}
 
     # 追加されたジョブ
     for key in new_dict:
         if key not in old_dict:
-            changes.append({"種別": "追加", "工事番号": key, "内容": new_dict[key]})
+            changes.append({"種別": "追加", "工事番号": key[0], "外形図番": key[1], "内容": new_dict[key]})
 
     # 削除されたジョブ
     for key in old_dict:
         if key not in new_dict:
-            changes.append({"種別": "削除", "工事番号": key, "内容": old_dict[key]})
+            changes.append({"種別": "削除", "工事番号": key[0], "外形図番": key[1], "内容": old_dict[key]})
 
     # 変更されたジョブ
     for key in new_dict:
@@ -946,7 +963,7 @@ def detect_changes(old_rows, new_rows, settings=None):
             new = new_dict[key]
             diff_items = []
             for i, header in enumerate(HEADERS):
-                if header in ("積上日", "工事番号"):
+                if header in ("積上日", "工事番号", "外形図番"):
                     continue
                 if not _should_notify(header):
                     continue
@@ -955,7 +972,7 @@ def detect_changes(old_rows, new_rows, settings=None):
                 if old_val != new_val:
                     diff_items.append(f"{header}：{old_val} → {new_val}")
             if diff_items:
-                changes.append({"種別": "変更", "工事番号": key, "差分": diff_items})
+                changes.append({"種別": "変更", "工事番号": key[0], "外形図番": key[1], "差分": diff_items})
 
     return changes
 
@@ -972,7 +989,8 @@ def send_email(changes, new_rows, changes_sheet_url="", mail_to_list=None):
     lines = [f"生産計画表の変更を検知しました。（確認日時：{now}）\n"]
 
     for c in changes:
-        lines.append(f"■ {c['種別']}　工事番号：{c['工事番号']}")
+        gaiken = c.get("外形図番", "")
+        lines.append(f"■ {c['種別']}　工事番号：{c['工事番号']}　外形図番：{gaiken}")
         if c["種別"] == "追加":
             for i, h in enumerate(HEADERS):
                 if i < len(c["内容"]):
