@@ -211,12 +211,30 @@ def read_settings(client):
         return {key: val for key, val, _ in _DEFAULT_SETTINGS}
 
 
+def _clear_formatting(ws, num_cols, num_rows=500):
+    """セルの書式（背景色・罫線など）をリセットする。ws.clear() は値のみ消去のため別途必要"""
+    ws.spreadsheet.batch_update({"requests": [{
+        "repeatCell": {
+            "range": {
+                "sheetId": ws.id,
+                "startRowIndex": 0,
+                "endRowIndex": num_rows,
+                "startColumnIndex": 0,
+                "endColumnIndex": num_cols,
+            },
+            "cell": {"userEnteredFormat": {}},
+            "fields": "userEnteredFormat",
+        }
+    }]})
+
+
 def write_sheet(client, sheet_name, rows, run_datetime="", changes=None):
     """指定シートを上書きする。1行目に取得日時、2行目にヘッダー、3行目以降にデータ"""
     sh = client.open_by_key(SPREADSHEET_ID)
     try:
         ws = sh.worksheet(sheet_name)
         ws.clear()
+        _clear_formatting(ws, len(HEADERS))
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=sheet_name, rows=500, cols=20)
 
@@ -287,7 +305,7 @@ def format_sheet(ws, rows):
                         "endColumnIndex": num_cols,
                     },
                     "top": {
-                        "style": "SOLID_MEDIUM",
+                        "style": "SOLID",
                         "color": {"red": 0.0, "green": 0.0, "blue": 0.0},
                     },
                 }
@@ -343,6 +361,7 @@ def write_changes_sheet(client, changes, run_datetime=""):
     try:
         ws = sh.worksheet(SHEET_CHANGES)
         ws.clear()
+        _clear_formatting(ws, 6)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=SHEET_CHANGES, rows=500, cols=10)
 
