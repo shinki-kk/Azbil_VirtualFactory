@@ -216,9 +216,11 @@ def write_changes_sheet(client, changes, run_datetime=""):
     meta_row       = [f"確認日時：{run_datetime}"] if run_datetime else [""]
     change_headers = ["種別", "工事番号", "変更項目", "変更前", "変更後"]
 
+    changes_sheet_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={ws.id}"
+
     if not changes:
         ws.update([meta_row, ["変更はありませんでした"]])
-        return
+        return changes_sheet_url
 
     change_rows = []
     for c in changes:
@@ -278,6 +280,8 @@ def write_changes_sheet(client, changes, run_datetime=""):
 
     if requests:
         ws.spreadsheet.batch_update({"requests": requests})
+
+    return changes_sheet_url
 
 
 # ──────────────────────────────────────────
@@ -760,7 +764,7 @@ def detect_changes(old_rows, new_rows):
 # ──────────────────────────────────────────
 # メール送信
 # ──────────────────────────────────────────
-def send_email(changes, new_rows):
+def send_email(changes, new_rows, changes_sheet_url=""):
     """変更内容をメールで送信する"""
     now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M")
     subject = f"【生産計画表】変更通知 {now}"
@@ -785,7 +789,8 @@ def send_email(changes, new_rows):
         lines.append("")
 
     lines.append(f"\n今回のクロールで取得したジョブ数：{len(new_rows)}件")
-    lines.append(f"\nスプレッドシートで確認（変更履歴シートに詳細あり）：\n{SPREADSHEET_URL}")
+    url = changes_sheet_url or SPREADSHEET_URL
+    lines.append(f"\n変更履歴シートで確認：\n{url}")
 
     body = "\n".join(lines)
 
@@ -802,14 +807,15 @@ def send_email(changes, new_rows):
     print("メール送信完了")
 
 
-def send_no_change_email(new_rows):
+def send_no_change_email(new_rows, changes_sheet_url=""):
     """変更なしの場合も確認メールを送る"""
     now = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M")
     subject = f"【生産計画表】変更なし {now}"
+    url = changes_sheet_url or SPREADSHEET_URL
     body = (
         f"生産計画表に変更はありませんでした。（確認日時：{now}）\n"
         f"取得ジョブ数：{len(new_rows)}件\n\n"
-        f"スプレッドシートで確認：\n{SPREADSHEET_URL}"
+        f"変更履歴シートで確認：\n{url}"
     )
 
     msg = MIMEMultipart()
@@ -853,15 +859,15 @@ def main():
     print("[ステップ5a] バックアップシート「前回データ」更新OK")
     write_sheet(client, SHEET_MAIN, new_rows, run_datetime, changes=changes)
     print("[ステップ5b] メインシート「最新データ」更新OK（変更行に色付け済み）")
-    write_changes_sheet(client, changes, run_datetime)
+    changes_sheet_url = write_changes_sheet(client, changes, run_datetime)
     print("[ステップ5c] 変更履歴シート更新OK")
     print("スプレッドシート更新完了")
 
     print("[ステップ6] メールを送っています…")
     if changes:
-        send_email(changes, new_rows)
+        send_email(changes, new_rows, changes_sheet_url)
     else:
-        send_no_change_email(new_rows)
+        send_no_change_email(new_rows, changes_sheet_url)
     print("[ステップ6] OK")
 
     print("処理完了")
